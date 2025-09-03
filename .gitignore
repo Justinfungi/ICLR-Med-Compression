@@ -1,0 +1,328 @@
+# ====================================
+# Medical Compression Project .gitignore
+# ====================================
+
+# ====================== 数据文件 ======================
+# 医学图像数据 - 通常很大，不应该提交到Git
+*.nii
+*.nii.gz
+*.dcm
+*.dicom
+*.mhd
+*.raw
+*.img
+*.hdr
+
+# 数据集目录
+acdc_dataset/
+ACDC/
+data/
+dataset/
+datasets/
+raw_data/
+processed_data/
+
+# ====================== Python ======================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
+#   However, in case of collaboration, if having platform-specific dependencies or dependencies
+#   having no cross-platform support, pipenv may install dependencies that don't work, or not
+#   install all needed dependencies.
+#Pipfile.lock
+
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# ====================== Machine Learning ======================
+# Model files
+*.pth
+*.pt
+*.ckpt
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.joblib
+*.model
+*.weights
+*.pb
+
+# TensorBoard logs
+logs/
+runs/
+tensorboard_logs/
+lightning_logs/
+
+# MLflow
+mlruns/
+mlflow_tracking/
+
+# Weights & Biases
+wandb/
+
+# PyTorch Lightning
+.pl_cache/
+
+# ====================== 输出文件 ======================
+# 结果和输出目录
+output/
+outputs/
+results/
+experiments/
+checkpoints/
+saved_models/
+trained_models/
+
+# 图像和视频输出
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.avi
+*.mov
+*.webm
+
+# 文档文件（通常较大）
+*.pdf
+*.doc
+*.docx
+*.ppt
+*.pptx
+
+# 大文件和资源文件 - 优先级更高
+assets/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Jupyter notebooks with outputs
+*.ipynb
+
+# 除了示例图片和文档中的图片
+!examples/*.png
+!examples/*.jpg
+!docs/*.png
+!docs/*.jpg
+!README_images/
+!demo_images/
+!**/small_images/*.png
+!**/icons/*.png
+
+# ====================== 开发工具 ======================
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# ====================== 临时文件 ======================
+# 临时文件
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# 缓存文件
+cache/
+.cache/
+*.cache
+
+# ====================== 配置文件 ======================
+# 本地配置文件（包含敏感信息）
+config/local.py
+config/secrets.py
+.env.local
+.env.production
+*.secret
+*_token.md
+*_keys.md
+secrets.txt
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# ====================== 特定项目文件 ======================
+# ACDC 数据集相关
+patient*/
+training/
+testing/
+
+# 压缩实验结果
+compression_results/
+quality_metrics/
+rate_distortion/
+
+# 性能测试结果
+benchmarks/
+profiling/
+
+# 远程仓库中的大文件和目录
+RLVC/
+modeling/
+utils/
+1.test_RLVC_Original.py
+demo.ipynb
+README_MaskGen.md
+README_RAR.md
+README_TiTok.md
+
+# ====================== 其他 ======================
+# 日志文件
+*.log
+
+# 压缩文件
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# 大文件和二进制文件
+*.bin
+*.dat
+*.npy
+*.npz
+
+# Jupyter notebook outputs (keep notebooks but not outputs)
+*.ipynb
+!**/examples/*.ipynb
