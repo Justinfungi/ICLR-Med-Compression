@@ -41,7 +41,7 @@ def quick_start_example():
     example_code = '''
 # 快速开始使用ACDC数据加载器
 
-from datalaoder import ACDCDataset, ACDCDataModule, get_train_transforms
+from dataloader import ACDCDataset, ACDCDataModule, get_train_transforms
 
 # 1. 创建数据集
 dataset = ACDCDataset(
@@ -116,11 +116,11 @@ def _show_welcome():
 ✅ 完整的使用示例和文档
 
 快速开始:
->>> from datalaoder import ACDCDataset, quick_start_example
+>>> from dataloader import ACDCDataset, quick_start_example
 >>> print(quick_start_example())
 
 检查依赖:
->>> from datalaoder import check_dependencies
+>>> from dataloader import check_dependencies
 >>> check_dependencies()
 
 更多信息请查看 README.md

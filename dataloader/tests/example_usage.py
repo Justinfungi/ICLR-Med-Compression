@@ -369,7 +369,7 @@ def example_cardiac_metrics():
         # 获取ED和ES分割图
         ed_seg = sample['segmentations'][0].numpy()  # ED
         es_seg = sample['segmentations'][1].numpy()  # ES
-        input(sample['metadata'])
+        
         # 获取体素间距
         spacing = sample['metadata'].get('spacing', (1.5625, 1.5625, 10.0))
         
