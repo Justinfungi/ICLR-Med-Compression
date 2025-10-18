@@ -25,8 +25,8 @@ output:
 # 模型配置
 model:
   freeze_generator: true  # 只微调tokenizer
-  tokenizer_path: "./checkpoints/tokenizer_titok_b64"
-  generator_path: "./checkpoints/generator_titok_b64"
+  tokenizer_path: "./checkpoints/tokenizer_titok_bl128_vae_c16_imagenet"
+  generator_path: null  # 不使用generator，专注tokenizer微调
 
 # 设备配置
 device: "cuda"  # "cuda" 或 "cpu"

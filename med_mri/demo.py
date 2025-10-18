@@ -8,12 +8,14 @@ This script demonstrates the TiTok tokenizer functionality:
 3. Generate new images from tokens
 """
 
+import sys
+import os
+sys.path.append('../1d-tokenizer')
 import demo_util
 import numpy as np
 import torch
 from PIL import Image
 import imagenet_classes
-import os
 import matplotlib.pyplot as plt
 from huggingface_hub import hf_hub_download
 from modeling.maskgit import ImageBert
@@ -28,30 +30,27 @@ def setup_environment():
 
 
 def load_models():
-    """Load the TiTok tokenizer and generator models"""
-    print("🔄 Loading TiTok models...")
-
-    # Load configuration
-    config = demo_util.get_config("configs/infer/TiTok/titok_l32.yaml")
-    print(f"📋 Configuration loaded: {config}")
+    """Load the TiTok tokenizer model (generator disabled for compatibility)"""
+    print("🔄 Loading TiTok tokenizer...")
 
     # Load tokenizer
-    # supported tokenizer: [tokenizer_titok_l32_imagenet, tokenizer_titok_b64_imagenet, tokenizer_titok_s128_imagenet]
-    titok_tokenizer = TiTok.from_pretrained("yucornetto/tokenizer_titok_l32_imagenet")
+    # Option 1: Use local tokenizer (recommended for your custom model)
+    local_tokenizer_path = "checkpoints/tokenizer_titok_bl128_vae_c16_imagenet"
+    if os.path.exists(local_tokenizer_path):
+        print(f"✅ 使用本地tokenizer: {local_tokenizer_path}")
+        titok_tokenizer = TiTok.from_pretrained(local_tokenizer_path)
+    else:
+        # Option 2: Fallback to HuggingFace tokenizer
+        # supported tokenizer: [tokenizer_titok_l32_imagenet, tokenizer_titok_b64_imagenet, tokenizer_titok_s128_imagenet]
+        print("⚠️ 本地tokenizer未找到，使用HuggingFace tokenizer")
+        titok_tokenizer = TiTok.from_pretrained("yucornetto/tokenizer_titok_l32_imagenet")
     titok_tokenizer.eval()
     titok_tokenizer.requires_grad_(False)
     print("✅ Tokenizer loaded successfully")
 
-    # Load generator
-    # supported generator: [generator_titok_l32_imagenet, generator_titok_b64_imagenet, generator_titok_s128_imagenet]
-    titok_generator = ImageBert.from_pretrained("yucornetto/generator_titok_l32_imagenet")
-    titok_generator.eval()
-    titok_generator.requires_grad_(False)
-    print("✅ Generator loaded successfully")
-
-    # Alternative loading method (commented out):
-    # hf_hub_download(repo_id="fun-research/TiTok", filename="tokenizer_titok_l32.bin", local_dir="./")
-    # hf_hub_download(repo_id="fun-research/TiTok", filename="generator_titok_l32.bin", local_dir="./")
+    # Skip generator loading for now due to compatibility issues
+    print("⚠️ Generator暂时禁用 - 专注于tokenization和reconstruction功能")
+    titok_generator = None
 
     return titok_tokenizer, titok_generator
 
@@ -62,49 +61,101 @@ def setup_device(tokenizer, generator):
     print(f"🎯 Using device: {device}")
 
     tokenizer = tokenizer.to(device)
-    generator = generator.to(device)
+    if generator is not None:
+        generator = generator.to(device)
     print("✅ Models moved to device")
 
     return tokenizer, generator, device
 
 
 def tokenize_and_reconstruct(img_path, tokenizer, device, save_output=True):
-    """Tokenize an image into 32 discrete tokens and reconstruct it"""
+    """Tokenize an image into discrete tokens and reconstruct it"""
     print(f"🔄 Processing image: {img_path}")
 
     # Load and preprocess image
     original_image = Image.open(img_path)
+    
+    # Handle grayscale images (convert to RGB for consistency)
+    if original_image.mode == 'L':
+        print("📝 Converting grayscale image to RGB")
+        original_image = original_image.convert('RGB')
+    
+    # Convert to tensor and resize to expected size (256x256)
+    # The model expects 256x256 images based on the config
+    original_image = original_image.resize((256, 256), Image.LANCZOS)
     image = torch.from_numpy(np.array(original_image).astype(np.float32)).permute(2, 0, 1).unsqueeze(0) / 255.0
+    print(f"📊 Input image tensor shape: {image.shape}")
 
-    # Tokenize
-    encoded_tokens = tokenizer.encode(image.to(device))[1]["min_encoding_indices"]
+    # Tokenize - handle both VQ and VAE modes
+    with torch.no_grad():
+        encode_result = tokenizer.encode(image.to(device))
+        
+        # Check if we have a tuple (tokens, info_dict) or just tokens
+        if isinstance(encode_result, tuple) and len(encode_result) == 2:
+            tokens, info_dict = encode_result
+            
+            # Check quantization mode
+            if hasattr(tokenizer, 'quantize_mode'):
+                if tokenizer.quantize_mode == "vq":
+                    # VQ mode: use min_encoding_indices
+                    encoded_tokens = info_dict["min_encoding_indices"]
+                elif tokenizer.quantize_mode == "vae":
+                    # VAE mode: sample from posterior distribution
+                    posteriors = info_dict
+                    encoded_tokens = posteriors.sample()
+                else:
+                    # Fallback: try to get tokens directly
+                    encoded_tokens = tokens
+            else:
+                # Fallback: try min_encoding_indices first, then sample
+                if "min_encoding_indices" in info_dict:
+                    encoded_tokens = info_dict["min_encoding_indices"]
+                elif hasattr(info_dict, 'sample'):
+                    encoded_tokens = info_dict.sample()
+                else:
+                    encoded_tokens = tokens
+        else:
+            # Direct token return
+            encoded_tokens = encode_result
 
     # Reconstruct
-    reconstructed_image = tokenizer.decode_tokens(encoded_tokens)
-    reconstructed_image = torch.clamp(reconstructed_image, 0.0, 1.0)
-    reconstructed_image = (reconstructed_image * 255.0).permute(0, 2, 3, 1).to("cpu", dtype=torch.uint8).numpy()[0]
+    with torch.no_grad():
+        if hasattr(tokenizer, 'decode_tokens'):
+            reconstructed_image = tokenizer.decode_tokens(encoded_tokens)
+        else:
+            # Fallback to decode method
+            reconstructed_image = tokenizer.decode(encoded_tokens)
+        reconstructed_image = torch.clamp(reconstructed_image, 0.0, 1.0)
+        reconstructed_image = (reconstructed_image * 255.0).permute(0, 2, 3, 1).to("cpu", dtype=torch.uint8).numpy()[0]
 
     # Convert to PIL Image
     reconstructed_image = Image.fromarray(reconstructed_image)
 
-    print(f"📊 Input Image is represented by codes {encoded_tokens} with shape {encoded_tokens.shape}")
+    print(f"📊 Input Image is represented by tokens with shape {encoded_tokens.shape}")
+    if hasattr(encoded_tokens, 'min') and hasattr(encoded_tokens, 'max'):
+        print(f"🔢 Token values range: [{encoded_tokens.min().item()}, {encoded_tokens.max().item()}]")
+    else:
+        print(f"🔢 Token type: {type(encoded_tokens)}")
 
     if save_output:
         # Save images for comparison
         base_name = os.path.splitext(os.path.basename(img_path))[0]
-        output_dir = "output"
+        output_dir = "outputs/demos"
         os.makedirs(output_dir, exist_ok=True)
 
         original_image.save(f"{output_dir}/{base_name}_original.png")
         reconstructed_image.save(f"{output_dir}/{base_name}_reconstructed.png")
 
-        print(f"💾 Original image saved to: {output_dir}/{base_name}_original.png")
-        print(f"💾 Reconstructed image saved to: {output_dir}/{base_name}_reconstructed.png")
+        original_path = f"{output_dir}/{base_name}_original.png"
+        reconstructed_path = f"{output_dir}/{base_name}_reconstructed.png"
+        
+        print(f"💾 Original image saved to: {os.path.abspath(original_path)}")
+        print(f"💾 Reconstructed image saved to: {os.path.abspath(reconstructed_path)}")
 
         # Display using matplotlib (optional)
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
         ax1.imshow(original_image)
-        ax1.set_title("Original Image")
+        ax1.set_title("Original MRI Image")
         ax1.axis('off')
 
         ax2.imshow(reconstructed_image)
@@ -112,9 +163,10 @@ def tokenize_and_reconstruct(img_path, tokenizer, device, save_output=True):
         ax2.axis('off')
 
         plt.tight_layout()
-        plt.savefig(f"{output_dir}/{base_name}_comparison.png", dpi=150, bbox_inches='tight')
+        comparison_path = f"{output_dir}/{base_name}_comparison.png"
+        plt.savefig(comparison_path, dpi=150, bbox_inches='tight')
         plt.close()
-        print(f"💾 Comparison image saved to: {output_dir}/{base_name}_comparison.png")
+        print(f"💾 Comparison image saved to: {os.path.abspath(comparison_path)}")
 
     return encoded_tokens, reconstructed_image
 
@@ -183,8 +235,7 @@ def main():
 
     # Test images
     test_images = [
-        "assets/ILSVRC2012_val_00008636.png",
-        "assets/ILSVRC2012_val_00010240.png"
+        "../acdc_img_datasets/patient001/patient001_frame01_slice_000.png"
     ]
 
     for img_path in test_images:
@@ -194,27 +245,36 @@ def main():
         else:
             print(f"⚠️  Warning: Image not found: {img_path}")
 
-    print("\n" + "=" * 50)
-    print("🎨 IMAGE GENERATION DEMO")
-    print("=" * 50)
+    # Skip generation demo since generator is disabled
+    if titok_generator is not None:
+        print("\n" + "=" * 50)
+        print("🎨 IMAGE GENERATION DEMO")
+        print("=" * 50)
 
-    # Generate sample images
-    sample_labels = [torch.randint(0, 999, size=(1,)).item() for _ in range(3)]  # Generate 3 random samples
-    print(f"🎲 Random labels generated: {sample_labels}")
+        # Generate sample images
+        sample_labels = [torch.randint(0, 999, size=(1,)).item() for _ in range(3)]  # Generate 3 random samples
+        print(f"🎲 Random labels generated: {sample_labels}")
 
-    generated_images = generate_image_from_tokens(
-        titok_generator,
-        titok_tokenizer,
-        sample_labels,
-        device,
-        guidance_scale=3.5,
-        randomize_temperature=1.0,
-        num_sample_steps=8
-    )
+        generated_images = generate_image_from_tokens(
+            titok_generator,
+            titok_tokenizer,
+            sample_labels,
+            device,
+            guidance_scale=3.5,
+            randomize_temperature=1.0,
+            num_sample_steps=8
+        )
+    else:
+        print("\n" + "=" * 50)
+        print("⚠️ IMAGE GENERATION DEMO SKIPPED")
+        print("Generator未加载 - 专注于tokenization和reconstruction功能")
+        print("=" * 50)
 
     print("\n" + "=" * 50)
     print("✅ Demo completed successfully!")
-    print("📁 Check the 'output' directory for generated images and reconstructions.")
+    output_abs_path = os.path.abspath("outputs/demos")
+    print(f"📁 Check the output directory for generated images and reconstructions:")
+    print(f"   {output_abs_path}")
 
 
 if __name__ == "__main__":

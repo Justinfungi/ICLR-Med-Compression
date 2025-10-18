@@ -220,6 +220,8 @@ def main():
                       help='List available models and exit')
     parser.add_argument('--non-interactive', action='store_true',
                       help='Skip interactive selection and use defaults')
+    parser.add_argument('--best-only', action='store_true',
+                      help='Download only the best performing model (tokenizer_bl128_vae) without any prompts')
 
     args = parser.parse_args()
 
@@ -227,10 +229,11 @@ def main():
     if args.list:
         display_model_menu()
         print("\nUsage examples:")
-        print("  python download_checkpoints.py --models tokenizer_b64")
-        print("  python download_checkpoints.py --models tokenizer_b64 generator_b64")
-        print("  python download_checkpoints.py --models tokenizer_bl128_vq")
-        print("  python download_checkpoints.py  # Interactive selection")
+        print("  python download_checkpoints.py --best-only                    # Auto-download best model")
+        print("  python download_checkpoints.py --non-interactive            # Non-interactive default")
+        print("  python download_checkpoints.py --models tokenizer_b64       # Specific model")
+        print("  python download_checkpoints.py --models tokenizer_bl128_vq  # VQ model")
+        print("  python download_checkpoints.py                             # Interactive selection")
         return True
 
     print("╔" + "=" * 60 + "╗")
@@ -248,15 +251,23 @@ def main():
         return False
 
     # Determine which models to download
-    if args.models:
+    if args.best_only:
+        # Best-only mode: automatically select best performing model
+        models_to_download = ['tokenizer_bl128_vae']  # Best FID (0.84), suitable for H800
+        logger.info("🚀 Best-only mode: downloading top performing model for H800 fine-tuning: tokenizer_bl128_vae (FID: 0.84)")
+    elif args.models:
         models_to_download = args.models
         logger.info(f"📋 Downloading specified models: {', '.join(models_to_download)}")
     elif args.non_interactive:
-        # Non-interactive mode: use default
+        # Non-interactive mode: use best performing model
         models_to_download = ['tokenizer_bl128_vae']  # Best FID (0.84), suitable for H800
         logger.info("🎯 Non-interactive mode: downloading best performing model for H800 fine-tuning: tokenizer_bl128_vae (FID: 0.84)")
     else:
-        # Interactive mode: let user choose
+        # Interactive mode: show menu but suggest the best option
+        print("\n💡 For best performance on H800 GPUs, we recommend option 10 (tokenizer_bl128_vae)")
+        print("   This model has the lowest FID score (0.84) and is optimized for medical imaging.")
+        print("   💡 Tip: Use --best-only flag to auto-select the best model without prompts\n")
+
         logger.info("🔍 Starting interactive model selection...")
         selected_model = interactive_model_selection()
         if selected_model is None:
@@ -295,8 +306,15 @@ def main():
 
         print()
         logger.info("💡 Usage in finetune_titok_mri.py:")
-        logger.info("   --tokenizer_path ./checkpoints/tokenizer_titok_b64_imagenet")
-        logger.info("   --generator_path ./checkpoints/generator_titok_b64_imagenet")
+        for path in downloaded_paths:
+            model_name = Path(path).name
+            if 'tokenizer' in model_name:
+                logger.info(f"   --tokenizer_path ./checkpoints/{model_name}")
+            elif 'generator' in model_name:
+                logger.info(f"   --generator_path ./checkpoints/{model_name}")
+        logger.info("")
+        logger.info("💡 Quick start:")
+        logger.info("   python finetune_titok_mri.py --batch_size 4 --num_epochs 20")
 
         return True
     else:

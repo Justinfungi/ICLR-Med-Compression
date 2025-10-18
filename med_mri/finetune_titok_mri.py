@@ -22,6 +22,62 @@ from tqdm import tqdm
 import warnings
 from typing import Tuple, Dict, Any, Optional
 from omegaconf import OmegaConf
+import csv
+
+# Manual implementations of image quality metrics
+def compute_ssim(img1, img2, data_range=1.0, win_size=11, sigma=1.5):
+    """Compute SSIM manually using torch operations"""
+    try:
+        # Create Gaussian kernel
+        coords = torch.arange(win_size, dtype=torch.float32, device=img1.device)
+        coords -= win_size // 2
+
+        g = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
+        g /= g.sum()
+
+        kernel = g[:, None] * g[None, :]
+        kernel = kernel.expand(img1.shape[1], 1, win_size, win_size).contiguous()
+
+        # Compute local means
+        mu1 = torch.nn.functional.conv2d(img1, kernel, groups=img1.shape[1], padding=win_size//2)
+        mu2 = torch.nn.functional.conv2d(img2, kernel, groups=img2.shape[1], padding=win_size//2)
+
+        mu1_sq = mu1 ** 2
+        mu2_sq = mu2 ** 2
+        mu1_mu2 = mu1 * mu2
+
+        # Compute local variances and covariance
+        sigma1_sq = torch.nn.functional.conv2d(img1 ** 2, kernel, groups=img1.shape[1], padding=win_size//2) - mu1_sq
+        sigma2_sq = torch.nn.functional.conv2d(img2 ** 2, kernel, groups=img2.shape[1], padding=win_size//2) - mu2_sq
+        sigma12 = torch.nn.functional.conv2d(img1 * img2, kernel, groups=img1.shape[1], padding=win_size//2) - mu1_mu2
+
+        # Constants
+        C1 = (0.01 * data_range) ** 2
+        C2 = (0.03 * data_range) ** 2
+
+        # Compute SSIM
+        numerator = (2 * mu1_mu2 + C1) * (2 * sigma12 + C2)
+        denominator = (mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2)
+
+        ssim_map = numerator / denominator
+        return ssim_map.mean().item()
+
+    except Exception as e:
+        print(f"⚠️ Error computing SSIM: {e}")
+        return None
+
+
+# Try to import torchmetrics, fallback to manual implementations
+try:
+    from torchmetrics.image import StructuralSimilarityIndexMeasure as SSIM
+    from torchmetrics.image import PeakSignalNoiseRatio as PSNR
+    from torchmetrics.image import LearnedPerceptualImagePatchSimilarity as LPIPS
+    HAS_TORCHMETRICS = True
+    print("✅ torchmetrics available - using optimized implementations")
+except ImportError:
+    print("⚠️ torchmetrics not available - using manual implementations for SSIM")
+    print("💡 SSIM will be computed manually, LPIPS will be skipped")
+    HAS_TORCHMETRICS = False
 
 # 添加项目路径 - 支持从med_mri目录或MedCompression目录运行
 current_dir = Path(__file__).parent
@@ -86,13 +142,26 @@ class TiTokMRIWrapper(nn.Module):
 
     def _load_tokenizer(self, checkpoint_path: str) -> TiTok:
         """加载TiTok tokenizer"""
+        checkpoint_path_obj = Path(checkpoint_path)
+
+        # Check if local checkpoint directory exists and has model files
+        if checkpoint_path_obj.exists() and checkpoint_path_obj.is_dir():
+            model_files = list(checkpoint_path_obj.glob("*.safetensors")) + list(checkpoint_path_obj.glob("*.bin"))
+            if model_files:
+                print(f"✅ 从本地路径加载tokenizer: {checkpoint_path}")
+                tokenizer = TiTok.from_pretrained(checkpoint_path)
+                return tokenizer
+
+        # Fallback to HuggingFace loading
         model_name = self._get_model_name_from_path(checkpoint_path)
         try:
             tokenizer = TiTok.from_pretrained(model_name)
             print(f"✅ 从HuggingFace加载tokenizer: {model_name}")
         except Exception as e:
-            print(f"⚠️ HuggingFace加载失败，尝试本地加载: {e}")
-            tokenizer = TiTok.from_pretrained(checkpoint_path)
+            print(f"⚠️ HuggingFace加载失败: {e}")
+            print(f"💡 请确保模型已下载到: {checkpoint_path}")
+            print(f"   或运行: python download_checkpoints.py --best-only")
+            raise e
 
         return tokenizer
 
@@ -133,25 +202,23 @@ class TiTokMRIWrapper(nn.Module):
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """前向传播: 编码 -> 解码"""
         # 编码为token (returns (tokens, info_dict))
-        with torch.no_grad():
-            encode_result = self.tokenizer.encode(x)
-            if isinstance(encode_result, tuple):
-                tokens, _ = encode_result  # tokens shape: [B, C, 1, 64]
-            else:
-                tokens = encode_result
+        encode_result = self.tokenizer.encode(x)
+        if isinstance(encode_result, tuple):
+            tokens, _ = encode_result  # tokens shape: [B, C, 1, 64]
+        else:
+            tokens = encode_result
 
         # 解码重建图像
-        with torch.no_grad():
-            if self.generator is not None:
-                reconstructed = self.generator.decode(tokens)
+        if self.generator is not None:
+            reconstructed = self.generator.decode(tokens)
+        else:
+            # 使用tokenizer的解码器
+            decode_result = self.tokenizer.decode(tokens)
+            # Handle both tensor and tuple returns
+            if isinstance(decode_result, tuple):
+                reconstructed = decode_result[0]
             else:
-                # 使用tokenizer的解码器
-                decode_result = self.tokenizer.decode(tokens)
-                # Handle both tensor and tuple returns
-                if isinstance(decode_result, tuple):
-                    reconstructed = decode_result[0]
-                else:
-                    reconstructed = decode_result
+                reconstructed = decode_result
 
         return reconstructed, tokens
 
@@ -173,15 +240,24 @@ class TiTokMRIWrapper(nn.Module):
 class TiTokMRIEvaluator:
     """评估器"""
 
-    def __init__(self):
-        pass
+    def __init__(self, device='cuda'):
+        self.device = device
+        if HAS_TORCHMETRICS:
+            # Initialize metrics
+            self.ssim = SSIM(data_range=1.0).to(device)
+            self.psnr_metric = PSNR(data_range=1.0).to(device)
+            self.lpips = LPIPS(net_type='alex').to(device)  # Using AlexNet backbone
+        else:
+            self.ssim = None
+            self.psnr_metric = None
+            self.lpips = None
 
     def compute_metrics(self, images, reconstructed, tokens):
         """计算重建指标"""
         # MSE
         mse = torch.mean((images - reconstructed) ** 2).item()
 
-        # PSNR
+        # PSNR (manual calculation)
         max_val = 1.0
         psnr = 20 * np.log10(max_val / np.sqrt(mse)) if mse > 0 else 100.0
 
@@ -190,27 +266,61 @@ class TiTokMRIEvaluator:
         n_tokens = tokens.shape[-1]
         compression_ratio = original_pixels / n_tokens
 
-        return {
+        metrics = {
             'mse': mse,
             'psnr': psnr,
             'compression_ratio': compression_ratio
         }
 
+        # Additional metrics
+        if HAS_TORCHMETRICS and self.ssim is not None:
+            try:
+                # SSIM (torchmetrics)
+                ssim_val = self.ssim(reconstructed, images).item()
+                metrics['ssim'] = ssim_val
+
+                # PSNR (torchmetrics version)
+                psnr_val = self.psnr_metric(reconstructed, images).item()
+                metrics['psnr_torchmetrics'] = psnr_val
+
+                # LPIPS
+                lpips_val = self.lpips(reconstructed, images).mean().item()
+                metrics['lpips'] = lpips_val
+
+            except Exception as e:
+                print(f"⚠️ Error computing torchmetrics: {e}")
+        else:
+            # Manual SSIM implementation when torchmetrics not available
+            try:
+                ssim_val = compute_ssim(reconstructed, images, data_range=1.0)
+                if ssim_val is not None:
+                    metrics['ssim'] = ssim_val
+                    print(f"✅ SSIM computed manually: {ssim_val:.4f}")
+                else:
+                    print("⚠️ Failed to compute SSIM manually")
+            except Exception as e:
+                print(f"⚠️ Error computing manual SSIM: {e}")
+
+            print("💡 LPIPS requires torchmetrics - skipping for now")
+
+        return metrics
+
 
 def save_sample_images(images, reconstructed, save_dir, epoch, prefix="val", max_samples=8):
     """
-    保存输入和重建图像样本
+    保存输入和重建图像样本到epoch子文件夹
 
     Args:
         images: 原始图像 [B, C, H, W]
         reconstructed: 重建图像 [B, C, H, W]
-        save_dir: 保存目录
+        save_dir: 基础保存目录
         epoch: 当前epoch
         prefix: 文件名前缀 ("val" 或 "test")
         max_samples: 最大保存样本数
     """
-    save_dir = Path(save_dir)
-    save_dir.mkdir(parents=True, exist_ok=True)
+    # 创建epoch子文件夹
+    epoch_dir = Path(save_dir) / f"epoch_{epoch:03d}"
+    epoch_dir.mkdir(parents=True, exist_ok=True)
 
     # 限制样本数量
     n_samples = min(max_samples, images.shape[0])
@@ -228,12 +338,53 @@ def save_sample_images(images, reconstructed, save_dir, epoch, prefix="val", max
         recon_img = (recon_img * 255).astype(np.uint8)
         recon_pil = Image.fromarray(recon_img)
 
-        # 保存图像
-        input_path = save_dir / f"{prefix}_epoch_{epoch:03d}_sample_{i:02d}_input.png"
-        recon_path = save_dir / f"{prefix}_epoch_{epoch:03d}_sample_{i:02d}_recon.png"
+        # 保存图像到epoch文件夹
+        input_path = epoch_dir / f"{prefix}_sample_{i:02d}_input.png"
+        recon_path = epoch_dir / f"{prefix}_sample_{i:02d}_recon.png"
 
         input_pil.save(input_path)
         recon_pil.save(recon_path)
+
+
+def init_metrics_csv(csv_path):
+    """初始化metrics CSV文件"""
+    with open(csv_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        # 写入表头 - always include SSIM now (manual implementation available)
+        headers = ['epoch', 'phase', 'loss', 'mse', 'psnr', 'compression_ratio', 'ssim']
+        if HAS_TORCHMETRICS:
+            headers.extend(['psnr_torchmetrics', 'lpips'])
+        writer.writerow(headers)
+
+
+def log_metrics_to_csv(csv_path, epoch, phase, metrics):
+    """将metrics记录到CSV文件"""
+    with open(csv_path, 'a', newline='') as f:
+        writer = csv.writer(f)
+
+        # Handle different key names for different phases
+        if phase == 'train':
+            # Training only has loss
+            mse = ''
+            psnr = ''
+            compression_ratio = ''
+            loss = metrics.get('train_loss', '')
+        else:
+            # Validation/Test have mse, psnr, etc.
+            mse = metrics.get('val_mse', metrics.get('mse', ''))
+            psnr = metrics.get('val_psnr', metrics.get('psnr', ''))
+            compression_ratio = metrics.get('compression_ratio', '')
+            loss = ''  # Validation doesn't have loss
+
+        row = [epoch, phase, loss, mse, psnr, compression_ratio]
+
+        # Always include SSIM now (manual implementation available)
+        row.append(metrics.get('ssim', ''))
+
+        if HAS_TORCHMETRICS:
+            row.extend([metrics.get('psnr_torchmetrics', ''), metrics.get('lpips', '')])
+
+        writer.writerow(row)
 
 
 def train_one_epoch(
@@ -245,7 +396,8 @@ def train_one_epoch(
     total_epochs: int,
 ) -> Dict[str, float]:
     """训练一个epoch"""
-    model.train()
+    model.train()  # 确保模型处于训练模式
+    model.tokenizer.train()  # 确保tokenizer处于训练模式
     total_loss = 0.0
     n_batches = 0
 
@@ -287,6 +439,10 @@ def validate(
     model.eval()
     total_mse = 0.0
     total_psnr = 0.0
+    total_compression_ratio = 0.0
+    total_ssim = 0.0
+    total_psnr_torchmetrics = 0.0
+    total_lpips = 0.0
     n_batches = 0
 
     with torch.no_grad():
@@ -296,20 +452,47 @@ def validate(
             reconstructed, tokens = model(images)
 
             metrics = evaluator.compute_metrics(images, reconstructed, tokens)
+
+            # Accumulate all metrics
             total_mse += metrics['mse']
             total_psnr += metrics['psnr']
+            total_compression_ratio += metrics['compression_ratio']
+
+            if 'ssim' in metrics:
+                total_ssim += metrics['ssim']
+            if 'psnr_torchmetrics' in metrics:
+                total_psnr_torchmetrics += metrics['psnr_torchmetrics']
+            if 'lpips' in metrics:
+                total_lpips += metrics['lpips']
+
             n_batches += 1
 
             # 保存第一批的图像样本
             if save_images and batch_idx == 0 and save_dir is not None:
                 save_sample_images(images, reconstructed, save_dir, epoch, prefix)
 
-            pbar.set_postfix({'mse': total_mse / n_batches, 'psnr': total_psnr / n_batches})
+            # Update progress bar with available metrics
+            pbar_metrics = {'mse': total_mse / n_batches, 'psnr': total_psnr / n_batches}
+            if 'ssim' in metrics:
+                pbar_metrics['ssim'] = total_ssim / n_batches
+            pbar.set_postfix(pbar_metrics)
 
-    return {
+    # Build return dictionary with all available metrics
+    result = {
         'val_mse': total_mse / n_batches,
-        'val_psnr': total_psnr / n_batches
+        'val_psnr': total_psnr / n_batches,
+        'compression_ratio': total_compression_ratio / n_batches
     }
+
+    # Add additional metrics if available
+    if total_ssim > 0:
+        result['ssim'] = total_ssim / n_batches
+    if total_psnr_torchmetrics > 0:
+        result['psnr_torchmetrics'] = total_psnr_torchmetrics / n_batches
+    if total_lpips > 0:
+        result['lpips'] = total_lpips / n_batches
+
+    return result
 
 
 def main(args):
@@ -335,19 +518,38 @@ def main(args):
     if device == 'cpu':
         logger.warning("⚠️ 使用CPU训练将非常慢，建议使用CUDA GPU")
 
-    # 输出目录
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint_dir = output_dir / 'checkpoints'
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    # 创建带时间戳的运行目录
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = f"run_{timestamp}"
 
-    # 图像保存目录
-    if args.save_images:
-        images_dir = output_dir / 'images'
-        images_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"图像将保存到: {images_dir}")
-    else:
-        images_dir = None
+    # 输出目录结构
+    output_dir = Path(args.output_dir)
+    run_dir = output_dir / 'checkpoints' / run_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    # 子目录
+    checkpoint_dir = run_dir  # checkpoints直接保存在run目录下
+    images_base_dir = run_dir / 'images'
+    logs_dir = run_dir / 'logs'
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    # 日志文件
+    metrics_log_path = logs_dir / 'training_metrics.csv'
+    training_log_path = logs_dir / 'training.log'
+
+    # 设置日志同时输出到文件和控制台
+    file_handler = logging.FileHandler(training_log_path)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logger.addHandler(file_handler)
+
+    logger.info(f"运行目录: {run_dir}")
+    logger.info(f"检查点保存到: {checkpoint_dir}")
+    logger.info(f"日志保存到: {logs_dir}")
+
+    # 图像保存目录 (按epoch组织)
+    images_dir = images_base_dir if args.save_images else None
+    if images_dir:
+        logger.info(f"图像将保存到: {images_dir} (按epoch组织)")
 
     # 创建数据加载器
     logger.info("创建数据加载器...")
@@ -372,6 +574,15 @@ def main(args):
         for param in model.generator.parameters():
             param.requires_grad = False
 
+    # 确保tokenizer参数可训练
+    for param in model.tokenizer.parameters():
+        param.requires_grad = True
+
+    # 调试：检查可训练参数数量
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info(f"模型参数: 总计 {total_params:,}, 可训练 {trainable_params:,}")
+
     # 优化器
     optimizer = optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
@@ -383,7 +594,11 @@ def main(args):
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.num_epochs)
 
     # 评估器
-    evaluator = TiTokMRIEvaluator()
+    evaluator = TiTokMRIEvaluator(device=device)
+
+    # 初始化metrics CSV
+    init_metrics_csv(metrics_log_path)
+    logger.info(f"Metrics将记录到: {metrics_log_path}")
 
     # 训练循环
     best_val_loss = float('inf')
@@ -415,13 +630,20 @@ def main(args):
 
         scheduler.step()
 
+        # 记录metrics到CSV
+        log_metrics_to_csv(metrics_log_path, epoch + 1, 'train', train_metrics)
+        log_metrics_to_csv(metrics_log_path, epoch + 1, 'val', val_metrics)
+
         # 日志
-        logger.info(
-            f"Epoch {epoch + 1}/{args.num_epochs} - "
-            f"Train Loss: {train_metrics['train_loss']:.6f} - "
-            f"Val MSE: {val_metrics['val_mse']:.6f} - "
-            f"Val PSNR: {val_metrics['val_psnr']:.2f}"
-        )
+        log_msg = f"Epoch {epoch + 1}/{args.num_epochs} - Train Loss: {train_metrics['train_loss']:.6f} - Val MSE: {val_metrics['val_mse']:.6f} - Val PSNR: {val_metrics['val_psnr']:.2f}"
+
+        # 添加额外metrics到日志
+        if 'ssim' in val_metrics:
+            log_msg += f" - Val SSIM: {val_metrics['ssim']:.4f}"
+        if 'lpips' in val_metrics:
+            log_msg += f" - Val LPIPS: {val_metrics['lpips']:.4f}"
+
+        logger.info(log_msg)
 
         # 保存checkpoint
         if (epoch + 1) % args.save_every == 0 or (epoch + 1) == args.num_epochs:
@@ -454,13 +676,21 @@ def main(args):
         prefix="test"
     )
 
-    logger.info(
-        f"测试结果 - "
-        f"MSE: {test_metrics['val_mse']:.6f} - "
-        f"PSNR: {test_metrics['val_psnr']:.2f}"
-    )
+    # 记录测试metrics到CSV
+    log_metrics_to_csv(metrics_log_path, -1, 'test', test_metrics)
 
+    # 测试结果日志
+    test_log_msg = f"测试结果 - MSE: {test_metrics['val_mse']:.6f} - PSNR: {test_metrics['val_psnr']:.2f}"
+
+    # 添加额外metrics到测试日志
+    if 'ssim' in test_metrics:
+        test_log_msg += f" - SSIM: {test_metrics['ssim']:.4f}"
+    if 'lpips' in test_metrics:
+        test_log_msg += f" - LPIPS: {test_metrics['lpips']:.4f}"
+
+    logger.info(test_log_msg)
     logger.info("训练完成！")
+    logger.info(f"所有输出保存在: {run_dir}")
 
 
 if __name__ == "__main__":

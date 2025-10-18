@@ -1,15 +1,60 @@
 # 变更日志
 
-## [1.1.5] - 2025-10-18
+## [1.2.7] - 2025-10-18
 
-### Enhanced
-- 推荐模型现在在VAE模型列表顶部显示，标有"⭐ BEST PERFORMANCE"
-- 改进认证错误处理，提供详细的登录说明和手动下载链接
-- VAE模型部分添加"Best for medical imaging"说明
-- 优化README.md，突出认证要求和手动下载选项
+### Added
+- 手动实现SSIM计算：无需torchmetrics即可计算SSIM指标
+- 增强metrics计算：即使没有torchmetrics也能获得SSIM值
+- 改进CSV表头：SSIM列现在始终可用
+
+### Changed
+- 修改metrics导入策略：torchmetrics可选，手动实现作为后备方案
+
+## [1.2.6] - 2025-10-18
+
+### Changed
+- 修改demo.py默认输出目录：从`output/`更改为`outputs/demos/`以更好地组织演示结果
+- 更新输出路径提示：显示完整的绝对路径以便用户轻松定位生成的文件
+
+## [1.2.6] - 2025-10-18
 
 ### Fixed
-- 修复模型选择菜单的排序逻辑，确保推荐模型优先显示
+- 修复CSV metrics日志记录：正确处理训练和验证的不同metrics键名
+- 修复验证函数：现在返回完整的metrics字典包括compression_ratio、SSIM等
+- 解决metrics为空的问题：确保所有计算的metrics都被正确记录
+
+### Enhanced
+- 改进validate函数：累积所有可用的metrics (MSE, PSNR, SSIM, LPIPS等)
+- 优化CSV写入逻辑：正确映射训练和验证阶段的不同metrics名称
+- 增强进度条显示：显示所有可用metrics的实时更新
+
+## [1.2.1] - 2025-10-18
+
+### Changed
+- 修改demo.py脚本支持使用本地tokenizer权重：添加对tokenizer_titok_bl128_vae_c16_imagenet本地模型的自动检测和加载
+- 优化模型加载逻辑：优先使用本地checkpoint，如果不存在则回退到HuggingFace预训练模型
+- 提升模型灵活性：允许用户轻松切换使用自定义训练的tokenizer而无需修改代码
+
+### Enhanced
+- 改进模型加载的用户体验：添加明确的加载状态提示，显示使用本地还是远程模型
+- 增强代码健壮性：添加路径存在性检查，避免加载失败时的崩溃
+
+## [1.2.0] - 2025-10-18
+
+### Fixed
+- 修复训练时的梯度计算错误："element 0 of tensors does not require grad"
+- 确保tokenizer参数在训练时可计算梯度
+- 添加详细的调试信息和错误检查
+- 强制模型处于训练模式以启用梯度计算
+
+### Enhanced
+- 添加参数统计日志：显示总参数数和可训练参数数
+- 添加loss梯度检查：在反向传播前验证loss tensor
+- 改进错误消息：提供具体的故障排除指导
+
+### Debug
+- 添加训练模式强制设置：model.train() 和 tokenizer.train()
+- 增加参数可训练性验证
 
 ## [1.0.9] - 2025-10-18
 
