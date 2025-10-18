@@ -1,0 +1,32 @@
+# TiTok MRI Fine-tuning Configuration
+
+# 数据配置
+data:
+  batch_size: 8
+  image_size: [256, 256]
+  augment: true
+  num_workers: 4
+
+# 训练配置
+training:
+  num_epochs: 20
+  learning_rate: 1e-4
+  weight_decay: 1e-4
+  save_every: 5  # 每5个epoch保存一次checkpoint
+  warmup_epochs: 2
+
+# 输出配置
+output:
+  dir: "@outputs/"  # 输出目录
+  save_validation_images: false  # 保存验证图像
+  save_test_images: false       # 保存测试图像
+  max_images_per_epoch: 10     # 每epoch最多保存图像数
+
+# 模型配置
+model:
+  freeze_generator: true  # 只微调tokenizer
+  tokenizer_path: "./checkpoints/tokenizer_titok_b64"
+  generator_path: "./checkpoints/generator_titok_b64"
+
+# 设备配置
+device: "cuda"  # "cuda" 或 "cpu"
