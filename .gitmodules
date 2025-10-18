@@ -1,3 +1,3 @@
 [submodule "1d-tokenizer"]
 	path = 1d-tokenizer
-	url = https://github.com/Justinfungi/1d-tokenizer.git
+	url = https://github.com/bytedance/1d-tokenizer.git
