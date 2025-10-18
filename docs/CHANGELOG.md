@@ -1,5 +1,16 @@
 # 变更日志
 
+## [1.0.6] - 2025-10-19
+
+### Fixed
+- 修复 git submodule 1d-tokenizer 引用错误：原引用提交 eae95054f9625a1f4e165aed45e15e55fa6a5f2d 在远程仓库中不存在，已更新为有效的最新提交 942a96f
+- 解决 `git submodule update --init --recursive` 命令执行失败的问题
+- 修复 ACDC 数据集转换器：脚本现在能正确识别 training/ 和 testing/ 子目录中的患者文件夹，支持标准 ACDC 数据集结构
+- 改进 ACDC 转换器：自动排除 ground truth 分割掩码文件（*_gt.nii.gz），只转换原始 MRI 图像用于压缩训练
+
+### Added
+- ACDC 数据集转换器现在支持完整的 150 个患者（100 个训练 + 50 个测试），成功转换 2978 张纯 MRI 图像（排除分割掩码）
+
 ## [1.0.0] - 2025-10-16
 
 ### Added

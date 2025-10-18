@@ -79,8 +79,15 @@ class ACDCConverter:
         output_patient_dir = self.output_dir / patient_name
         output_patient_dir.mkdir(parents=True, exist_ok=True)
 
-        # Find NIfTI files
+        # Find NIfTI files (exclude ground truth segmentation masks)
         nifti_files = sorted(patient_dir.glob('*.nii*'))
+
+        # Filter out ground truth files (_gt suffix)
+        nifti_files = [f for f in nifti_files if '_gt' not in f.name]
+
+        if not nifti_files:
+            logger.warning(f"No MRI image files found in {patient_dir} (ground truth files excluded)")
+            return
 
         for nifti_file in nifti_files:
             try:
@@ -107,14 +114,33 @@ class ACDCConverter:
 
     def convert(self):
         """Convert entire dataset"""
-        # Find patient directories
-        patient_dirs = sorted([d for d in self.source_dir.glob('patient*')])
+        # Find patient directories in both training and testing folders
+        patient_dirs = []
+
+        # Check for direct patient directories (legacy structure)
+        direct_patients = sorted([d for d in self.source_dir.glob('patient*')])
+        patient_dirs.extend(direct_patients)
+
+        # Check training directory
+        training_dir = self.source_dir / "training"
+        if training_dir.exists():
+            training_patients = sorted([d for d in training_dir.glob('patient*')])
+            patient_dirs.extend(training_patients)
+            logger.info(f"Found {len(training_patients)} patients in training/")
+
+        # Check testing directory
+        testing_dir = self.source_dir / "testing"
+        if testing_dir.exists():
+            testing_patients = sorted([d for d in testing_dir.glob('patient*')])
+            patient_dirs.extend(testing_patients)
+            logger.info(f"Found {len(testing_patients)} patients in testing/")
 
         if not patient_dirs:
-            logger.error(f"No patient directories found in {self.source_dir}")
+            logger.error(f"No patient directories found in {self.source_dir} or its subdirectories")
+            logger.error("Expected structure: acdc_dataset/{training,testing}/patientXXX/")
             return False
 
-        logger.info(f"Found {len(patient_dirs)} patient directories")
+        logger.info(f"Total: Found {len(patient_dirs)} patient directories")
 
         # Process each patient
         for patient_dir in tqdm(patient_dirs, desc="Converting patients"):
@@ -125,8 +151,8 @@ class ACDCConverter:
 
 def main():
     """Main function"""
-    source_dir = "/root/Documents/ICLR-Med/MedCompression/acdc_dataset"
-    output_dir = "/root/Documents/ICLR-Med/MedCompression/acdc_img_datasets"
+    source_dir = "./acdc_dataset"
+    output_dir = "./acdc_img_datasets"
 
     print("╔" + "=" * 70 + "╗")
     print("║" + "  🫀 ACDC Dataset Converter (NIfTI → PNG)".center(70) + "║")
