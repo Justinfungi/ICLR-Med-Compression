@@ -10,12 +10,20 @@ import sys
 import torch
 from pathlib import Path
 
-# 添加项目路径
-project_root = Path(__file__).parent.parent
-sys.path.append(str(project_root))
+# 添加项目路径 - 支持从med_mri目录或MedCompression目录运行
+current_dir = Path(__file__).parent
+med_root = current_dir if current_dir.name == 'med_mri' else Path.cwd()
+med_compression_root = med_root.parent if med_root.name == 'med_mri' else med_root
 
-from med_mri.acdc_dataset import create_data_loaders
-from med_mri.finetune_titok_mri import TiTokMRIWrapper, TiTokMRIEvaluator
+sys.path.insert(0, str(med_compression_root))
+sys.path.insert(0, str(med_root))
+
+try:
+    from med_mri.acdc_dataset import create_data_loaders
+    from med_mri.finetune_titok_mri import TiTokMRIWrapper, TiTokMRIEvaluator
+except ImportError:
+    from acdc_dataset import create_data_loaders
+    from finetune_titok_mri import TiTokMRIWrapper, TiTokMRIEvaluator
 
 
 def test_basic_functionality():

@@ -23,15 +23,28 @@ import warnings
 from typing import Tuple, Dict, Any, Optional
 from omegaconf import OmegaConf
 
-# 添加项目路径
-project_root = Path(__file__).parent.parent
-sys.path.append(str(project_root))
+# 添加项目路径 - 支持从med_mri目录或MedCompression目录运行
+current_dir = Path(__file__).parent
+med_root = current_dir if current_dir.name == 'med_mri' else Path.cwd()
+med_compression_root = med_root.parent if med_root.name == 'med_mri' else med_root
+
+sys.path.insert(0, str(med_compression_root))
+sys.path.insert(0, str(med_root))
 
 # 导入必要的模块
-from modeling.titok import TiTok
-from modeling.maskgit import ImageBert
-from med_mri.acdc_dataset import create_data_loaders, ACDCMRIDataset
-import demo_util
+try:
+    from modeling.titok import TiTok
+    from modeling.maskgit import ImageBert
+except ImportError:
+    # 如果在1d-tokenizer中运行，调整路径
+    sys.path.insert(0, str(med_compression_root / '1d-tokenizer'))
+    from modeling.titok import TiTok
+    from modeling.maskgit import ImageBert
+
+try:
+    from med_mri.acdc_dataset import create_data_loaders, ACDCMRIDataset
+except ImportError:
+    from acdc_dataset import create_data_loaders, ACDCMRIDataset
 
 warnings.filterwarnings("ignore")
 
