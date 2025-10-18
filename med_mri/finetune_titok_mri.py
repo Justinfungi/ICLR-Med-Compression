@@ -750,7 +750,7 @@ def main(args):
                 'epoch': epoch,
                 'model_state_dict': model.tokenizer.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                'train_loss': train_metrics['train_loss'],
+                'train_loss': train_metrics['total_loss'],
                 'val_mse': val_metrics['val_mse'],
             }, checkpoint_path)
             logger.info(f"Checkpoint保存到: {checkpoint_path}")

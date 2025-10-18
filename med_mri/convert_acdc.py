@@ -8,11 +8,19 @@ Source:  /root/Documents/ICLR-Med/MedCompression/acdc_dataset/
 Output:  /root/Documents/ICLR-Med/MedCompression/acdc_img_datasets/
 
 Usage:
-    python3 convert_acdc.py
+    # Extract keyframes only (default, faster processing)
+    python3 convert_acdc.py --extract_mode keyframe
+
+    # Extract all time frames (complete cardiac cycle)
+    python3 convert_acdc.py --extract_mode all_frames
+
+    # Custom paths
+    python3 convert_acdc.py --source_dir ./data/acdc --output_dir ./output/images
 """
 
 import os
 import sys
+import argparse
 from pathlib import Path
 import numpy as np
 from PIL import Image
@@ -30,9 +38,10 @@ logger = logging.getLogger(__name__)
 class ACDCConverter:
     """Convert ACDC dataset from NIfTI to PNG"""
 
-    def __init__(self, source_dir, output_dir):
+    def __init__(self, source_dir, output_dir, extract_mode='keyframe'):
         self.source_dir = Path(source_dir)
         self.output_dir = Path(output_dir)
+        self.extract_mode = extract_mode  # 'keyframe' or 'all_frames'
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.total_images = 0
 
@@ -95,8 +104,28 @@ class ACDCConverter:
                 img_data = self.load_nifti(nifti_file)
                 img_data = np.asarray(img_data)
 
-                # Handle 3D images (multiple slices)
-                if len(img_data.shape) == 3:
+                # Handle 4D images (height, width, slices, time_frames)
+                if len(img_data.shape) == 4:
+                    if self.extract_mode == 'all_frames':
+                        # Extract all time frames
+                        for slice_idx in range(img_data.shape[2]):
+                            for frame_idx in range(img_data.shape[3]):
+                                slice_data = img_data[:, :, slice_idx, frame_idx]
+                                stem = nifti_file.stem.replace('.nii', '')
+                                output_path = output_patient_dir / f"{stem}_slice_{slice_idx:03d}_frame_{frame_idx:03d}.png"
+                                self.save_image(slice_data, output_path)
+                    elif self.extract_mode == 'keyframe':
+                        # Extract only keyframe (typically first frame, or could be middle frame)
+                        # For cardiac MRI, often the end-diastolic frame is most representative
+                        keyframe_idx = img_data.shape[3] // 2  # Use middle frame as keyframe
+                        for slice_idx in range(img_data.shape[2]):
+                            slice_data = img_data[:, :, slice_idx, keyframe_idx]
+                            stem = nifti_file.stem.replace('.nii', '')
+                            output_path = output_patient_dir / f"{stem}_slice_{slice_idx:03d}_keyframe.png"
+                            self.save_image(slice_data, output_path)
+
+                # Handle 3D images (multiple slices, assuming single time frame)
+                elif len(img_data.shape) == 3:
                     for slice_idx in range(img_data.shape[2]):
                         slice_data = img_data[:, :, slice_idx]
                         stem = nifti_file.stem.replace('.nii', '')
@@ -151,8 +180,30 @@ class ACDCConverter:
 
 def main():
     """Main function"""
-    source_dir = "./acdc_dataset"
-    output_dir = "./acdc_img_datasets"
+    parser = argparse.ArgumentParser(
+        description="🫀 ACDC Dataset Converter - Convert NIfTI cardiac MRI to PNG images"
+    )
+    parser.add_argument(
+        "--source_dir",
+        type=str,
+        default="./acdc_dataset",
+        help="Source directory containing ACDC dataset"
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="./acdc_img_datasets",
+        help="Output directory for PNG images"
+    )
+    parser.add_argument(
+        "--extract_mode",
+        type=str,
+        choices=['keyframe', 'all_frames'],
+        default='keyframe',
+        help="Extraction mode: 'keyframe' (extract representative frame) or 'all_frames' (extract all time frames)"
+    )
+
+    args = parser.parse_args()
 
     print("╔" + "=" * 70 + "╗")
     print("║" + "  🫀 ACDC Dataset Converter (NIfTI → PNG)".center(70) + "║")
@@ -160,12 +211,13 @@ def main():
     print()
 
     # Verify source exists
-    if not Path(source_dir).exists():
-        logger.error(f"❌ Source directory not found: {source_dir}")
+    if not Path(args.source_dir).exists():
+        logger.error(f"❌ Source directory not found: {args.source_dir}")
         return False
 
-    logger.info(f"Source: {source_dir}")
-    logger.info(f"Output: {output_dir}")
+    logger.info(f"Source: {args.source_dir}")
+    logger.info(f"Output: {args.output_dir}")
+    logger.info(f"Extract mode: {args.extract_mode}")
     logger.info("")
 
     # Check dependencies
@@ -177,7 +229,7 @@ def main():
         return False
 
     # Create converter
-    converter = ACDCConverter(source_dir, output_dir)
+    converter = ACDCConverter(args.source_dir, args.output_dir, args.extract_mode)
 
     # Convert dataset
     logger.info("Starting conversion...")

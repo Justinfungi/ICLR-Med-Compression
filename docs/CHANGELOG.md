@@ -1,6 +1,42 @@
 # 变更日志
 
+## [1.3.0] - 2025-10-18
+
+### Added
+- 新增命令行参数支持：添加`--extract_mode`参数选择提取模式
+- 灵活的帧提取选项：支持`keyframe`（关键帧）和`all_frames`（所有帧）两种模式
+- 增强参数化配置：支持自定义源目录和输出目录路径
+- 改进用户界面：更新帮助文档和使用示例
+
+### Changed
+- 重构ACDCConverter类：添加extract_mode参数支持条件化处理逻辑
+- 优化关键帧选择：使用心脏周期中间帧作为代表性关键帧（end-diastolic相位）
+- 改进文件名规范：关键帧模式使用`_keyframe.png`后缀区分
+
+### Details
+- **提取模式**: `keyframe`模式提取单个代表性帧（心脏舒张末期），`all_frames`模式提取完整心脏周期
+- **向后兼容**: 默认模式为`keyframe`，保持与之前版本的行为一致
+- **参数验证**: 添加choices限制确保只接受有效参数值
+
+## [1.2.9] - 2025-10-18
+
+### Changed
+- 增强ACDC数据集转换器：支持4D心脏MRI数据处理，提取所有时间帧而不仅是关键帧
+- 更新convert_acdc.py脚本：添加对4D数据的完整支持，循环处理所有时间帧维度
+- 优化图像命名规范：4D数据输出文件名包含slice和frame索引，便于后续处理
+
+### Details
+- **4D数据支持**: 心脏MRI数据通常为4D格式[x,y,slice,time]，新增对时间维度的完整提取
+- **文件名格式**: 4D图像保存为`{stem}_slice_{slice_idx:03d}_frame_{frame_idx:03d}.png`
+- **向后兼容**: 保持对2D和3D数据的原有处理逻辑不变
+
 ## [1.2.8] - 2025-10-18
+
+### Fixed
+- 修正H800 GPU集群SBATCH脚本配置：改用q-hgpu-batch分区，指定gpucluster-g4可用节点
+- 优化训练参数：批大小16，训练轮数300，利用7天时间限制
+- 解决"Requested node configuration is not available"错误
+- 修复KeyError 'train_loss'：checkpoint保存时使用正确的metrics键名'total_loss'
 
 ### Added
 - 完整的损失函数模块 (`loss.py`)：基于TiTok Stage 2实现
@@ -9,6 +45,14 @@
 - 可选GAN对抗训练支持
 - Einops库集成用于优雅的张量操作
 - 扩展的CSV日志：记录所有损失组件
+- H800 GPU集群的SBATCH作业脚本 (`titok_finetune_h800.sbatch`)
+  - 配置1个H800 GPU，240GB内存，12 CPU核心
+  - 使用q-hgpu-batch分区（批量作业专用）
+  - 指定gpucluster-g4节点（当前可用H800节点）
+  - 设置7天时间限制和邮件通知
+  - 包含完整的环境检查和错误处理
+  - 使用完整的TiTok损失函数（重建+感知+GAN）
+  - 优化批大小为16，适合单GPU训练
 
 ### Changed
 - 训练脚本集成新损失函数：替换简单的MSE损失

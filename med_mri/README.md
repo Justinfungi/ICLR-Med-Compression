@@ -264,6 +264,37 @@ outputs/checkpoints/run_<YYYYMMDD_HHMMSS>/
     └── training_metrics.csv         # Metrics CSV
 ```
 
+## 🚀 集群作业提交
+
+### H800/H100 GPU集群
+
+项目包含专门为HKU H800/H100 GPU集群优化的SBATCH脚本：
+
+```bash
+# 提交H800 GPU作业（推荐用于训练）
+sbatch titok_finetune_h800.sbatch
+```
+
+**脚本特性：**
+- ✅ 1个H800 GPU，240GB内存，12 CPU核心
+- ✅ 7天时间限制，自动邮件通知
+- ✅ 使用q-hgpu-batch分区（批量作业专用）
+- ✅ 指定gpucluster-g4节点（当前可用）
+- ✅ 完整的环境检查和错误处理
+- ✅ 使用完整的TiTok损失函数（重建+感知+GAN）
+- ✅ 优化批大小为16，适合单GPU训练
+
+### 手动提交
+
+如果您需要自定义配置，可以在网关节点gpu3gate1上手动提交：
+
+```bash
+# 在网关节点gpu3gate1上提交作业
+sbatch your_batch_script.sh
+```
+
+确保您的脚本包含正确的资源请求和环境配置。
+
 ## 🔧 基本故障排除
 
 **CUDA不可用**：使用 `--device cpu`
