@@ -83,6 +83,87 @@ python example_usage.py
 ============================================================
 ```
 
+## 🚀 Git 操作指南
+
+本项目使用 Git 进行版本控制，并包含了 `1d-tokenizer` 作为 Git submodule。以下是常见的 Git 操作：
+
+### 1. 克隆仓库 (包含 Submodule)
+
+如果你是第一次克隆本项目，请使用 `--recurse-submodules` 选项来同时克隆主仓库和所有 Submodule：
+
+```bash
+git clone --recurse-submodules https://github.com/Justinfungi/ICLR-Med-Compression.git
+cd ICLR-Med-Compression
+```
+
+如果你已经克隆了主仓库但没有克隆 Submodule，或者 Submodule 目录是空的，可以手动初始化和更新 Submodule：
+
+```bash
+cd ICLR-Med-Compression
+git submodule update --init --recursive
+```
+
+### 2. 获取远程更新 (Fetch)
+
+`git fetch` 命令用于从远程仓库下载最新的提交、分支和标签，但不会自动合并或修改你本地的工作目录。这可以让你查看远程仓库的最新状态，而不会影响你当前的工作：
+
+```bash
+git fetch origin
+```
+
+要查看 `1d-tokenizer` Submodule 的更新：
+
+```bash
+cd 1d-tokenizer
+git fetch origin
+```
+
+### 3. 拉取并合并更新 (Pull)
+
+`git pull` 命令是 `git fetch` 和 `git merge` 的组合，它会从远程仓库获取更新并自动合并到你当前的分支：
+
+```bash
+# 拉取主仓库的更新并合并到当前分支
+git pull origin <your-current-branch>
+# 例如：git pull origin feature/20251019-mvp1
+```
+
+要拉取 `1d-tokenizer` Submodule 的更新：
+
+```bash
+cd 1d-tokenizer
+git pull origin main # 假设 submodule 的主分支是 main
+cd .. # 返回主仓库目录
+# 提交 submodule 引用更新
+git add 1d-tokenizer
+git commit -m "Update 1d-tokenizer submodule to latest upstream"
+```
+
+### 4. 更新所有 Submodule
+
+如果你有多个 Submodule，并希望将它们全部更新到主仓库中记录的最新提交，可以从主仓库的根目录运行：
+
+```bash
+git submodule update --remote
+```
+**注意**: 执行此命令后，如果 `submodule` 有更新，主仓库会检测到 `submodule` 引用的变化，你需要 `git add 1d-tokenizer` (或其他 submodule 路径) 并 `git commit -m "Update submodule references"` 来记录这个变化。
+
+### 5. 推送本地更改 (Push)
+
+当你完成了本地的更改（包括主仓库和 Submodule 的更改）并提交后，可以使用 `git push` 将它们上传到远程仓库：
+
+```bash
+# 推送当前分支到远程仓库
+git push origin <your-current-branch>
+# 例如：git push origin feature/20251019-mvp1
+```
+
+你也可以使用项目根目录下的 `push_to_github.sh` 脚本来简化推送过程，它会自动添加、提交并推送所有更改：
+
+```bash
+./push_to_github.sh
+```
+
 ## 📁 项目结构
 
 ```
@@ -98,67 +179,6 @@ MedCompression/
 │       └── example_usage.py   # 🎯 交互式示例程序
 ├── docs/                      # 📚 文档和论文
 ├── scripts/                   # 🛠️ 工具脚本
+├── 1d-tokenizer/              # ⚙️ TiTok tokenization submodule
 └── README.md                  # 📖 项目说明
 ```
-
-## 🎯 主要特性
-
-### 🔇 静默模式
-- 自动抑制所有 SimpleITK 和 matplotlib 警告
-- 图像直接保存，不弹出显示窗口
-- 干净清爽的命令行输出
-
-### 📁 自动输出管理
-- 时间戳命名的输出目录
-- 自动保存所有结果（图像、动画、报告、日志）
-- 完整的实验记录和可重现性
-
-### 🎨 丰富的可视化
-- 心脏时相对比图
-- 4D 心跳动画 GIF
-- 疾病分布统计图表
-- 分割结果叠加显示
-
-## 🧠 支持的模型
-
-### 分割模型
-- **SimpleSegModel**: 轻量级 3D CNN
-- **UNet3D**: 经典的 3D U-Net 架构
-- **CardiacNet**: 心脏专用多任务网络
-
-### 分类模型
-- **ResNet3DClassifier**: 3D ResNet 疾病分类
-
-## 📊 数据集信息
-
-**ACDC (Automated Cardiac Diagnosis Challenge)**
-- 🏥 **来源**: 法国里昂第一大学 CREATIS 实验室
-- 📈 **规模**: 100 例训练 + 50 例测试
-- 🔬 **模态**: 短轴心脏 MRI (cine-MRI)
-- 🎯 **任务**: 心脏分割 + 疾病分类
-- 📋 **疾病类型**: NOR, DCM, HCM, MINF, RV (5类)
-
-## 🔧 系统要求
-
-- Python 3.8+
-- PyTorch 1.8+
-- GPU 推荐（用于模型训练）
-- 磁盘空间: ~2GB（数据集）
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-## 📞 联系方式
-
-- **作者**: Justinfungi
-- **项目主页**: https://github.com/Justinfungi/ICLR-Med-Compression
-- **问题反馈**: https://github.com/Justinfungi/ICLR-Med-Compression/issues
-
----
-
-🎉 **开始探索医学图像压缩的奇妙世界吧！**
