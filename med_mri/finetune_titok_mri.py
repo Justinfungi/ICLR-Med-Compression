@@ -110,10 +110,24 @@ class TiTokMRIWrapper(nn.Module):
 
     def _get_model_name_from_path(self, path: str) -> str:
         """从路径提取模型名称"""
-        if 'b64' in path.lower():
+        path_lower = path.lower()
+
+        # Handle direct model names
+        if path.startswith('yucornetto/'):
+            return path
+
+        # Handle local directory names
+        if 'tokenizer_titok_bl128_vae_c16_imagenet' in path_lower:
+            return 'yucornetto/tokenizer_titok_bl128_vae_c16_imagenet'
+        elif 'tokenizer_titok_b64_imagenet' in path_lower:
             return 'yucornetto/tokenizer_titok_b64_imagenet'
-        elif 'b128' in path.lower():
+        elif 'generator_titok_b64_imagenet' in path_lower:
+            return 'yucornetto/generator_titok_b64_imagenet'
+        elif 'b64' in path_lower:
+            return 'yucornetto/tokenizer_titok_b64_imagenet'
+        elif 'b128' in path_lower:
             return 'yucornetto/tokenizer_titok_b128_imagenet'
+
         return 'yucornetto/tokenizer_titok_b64_imagenet'
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -183,6 +197,45 @@ class TiTokMRIEvaluator:
         }
 
 
+def save_sample_images(images, reconstructed, save_dir, epoch, prefix="val", max_samples=8):
+    """
+    保存输入和重建图像样本
+
+    Args:
+        images: 原始图像 [B, C, H, W]
+        reconstructed: 重建图像 [B, C, H, W]
+        save_dir: 保存目录
+        epoch: 当前epoch
+        prefix: 文件名前缀 ("val" 或 "test")
+        max_samples: 最大保存样本数
+    """
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    # 限制样本数量
+    n_samples = min(max_samples, images.shape[0])
+
+    for i in range(n_samples):
+        # 转换tensor到PIL图像
+        # 输入图像 (假设是RGB格式，范围[0,1])
+        input_img = images[i].cpu().permute(1, 2, 0).numpy()  # [H, W, C]
+        input_img = (input_img * 255).astype(np.uint8)
+        input_pil = Image.fromarray(input_img)
+
+        # 重建图像
+        recon_img = reconstructed[i].cpu().permute(1, 2, 0).numpy()  # [H, W, C]
+        recon_img = np.clip(recon_img, 0, 1)  # 确保范围在[0,1]
+        recon_img = (recon_img * 255).astype(np.uint8)
+        recon_pil = Image.fromarray(recon_img)
+
+        # 保存图像
+        input_path = save_dir / f"{prefix}_epoch_{epoch:03d}_sample_{i:02d}_input.png"
+        recon_path = save_dir / f"{prefix}_epoch_{epoch:03d}_sample_{i:02d}_recon.png"
+
+        input_pil.save(input_path)
+        recon_pil.save(recon_path)
+
+
 def train_one_epoch(
     model: TiTokMRIWrapper,
     train_loader: DataLoader,
@@ -226,6 +279,9 @@ def validate(
     device: str,
     epoch: int,
     evaluator: TiTokMRIEvaluator,
+    save_images: bool = False,
+    save_dir: str = None,
+    prefix: str = "val"
 ) -> Dict[str, float]:
     """验证"""
     model.eval()
@@ -235,7 +291,7 @@ def validate(
 
     with torch.no_grad():
         pbar = tqdm(val_loader, desc=f"Validating")
-        for batch in pbar:
+        for batch_idx, batch in enumerate(pbar):
             images = batch['image'].to(device)
             reconstructed, tokens = model(images)
 
@@ -243,6 +299,10 @@ def validate(
             total_mse += metrics['mse']
             total_psnr += metrics['psnr']
             n_batches += 1
+
+            # 保存第一批的图像样本
+            if save_images and batch_idx == 0 and save_dir is not None:
+                save_sample_images(images, reconstructed, save_dir, epoch, prefix)
 
             pbar.set_postfix({'mse': total_mse / n_batches, 'psnr': total_psnr / n_batches})
 
@@ -261,15 +321,33 @@ def main(args):
     )
     logger = logging.getLogger(__name__)
 
-    # 设备
-    device = args.device if torch.cuda.is_available() or args.device == 'cpu' else 'cpu'
-    logger.info(f"使用设备: {device}")
+    # 设备 - 优先使用CUDA
+    if args.device == 'cuda' and torch.cuda.is_available():
+        device = 'cuda'
+        logger.info(f"使用CUDA设备: {torch.cuda.get_device_name()}")
+    elif args.device == 'cpu':
+        device = 'cpu'
+        logger.info("使用CPU设备")
+    else:
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        logger.info(f"自动选择设备: {device}")
+
+    if device == 'cpu':
+        logger.warning("⚠️ 使用CPU训练将非常慢，建议使用CUDA GPU")
 
     # 输出目录
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir = output_dir / 'checkpoints'
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    # 图像保存目录
+    if args.save_images:
+        images_dir = output_dir / 'images'
+        images_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"图像将保存到: {images_dir}")
+    else:
+        images_dir = None
 
     # 创建数据加载器
     logger.info("创建数据加载器...")
@@ -322,13 +400,17 @@ def main(args):
             args.num_epochs
         )
 
-        # 验证
+        # 验证 - 定期保存图像样本
+        save_images_current = args.save_images and ((epoch + 1) % args.save_image_every == 0 or epoch == 0)
         val_metrics = validate(
             model,
             data_loaders['val'],
             device,
             epoch,
-            evaluator
+            evaluator,
+            save_images=save_images_current,
+            save_dir=str(images_dir) if images_dir else None,
+            prefix="val"
         )
 
         scheduler.step()
@@ -359,22 +441,41 @@ def main(args):
             best_path = checkpoint_dir / 'best_model.pt'
             torch.save(model.tokenizer.state_dict(), best_path)
 
+    # 测试集评估
+    logger.info("在测试集上进行最终评估...")
+    test_metrics = validate(
+        model,
+        data_loaders['test'],
+        device,
+        epoch=-1,  # 使用-1表示测试
+        evaluator=evaluator,
+        save_images=args.save_images,
+        save_dir=str(images_dir) if images_dir else None,
+        prefix="test"
+    )
+
+    logger.info(
+        f"测试结果 - "
+        f"MSE: {test_metrics['val_mse']:.6f} - "
+        f"PSNR: {test_metrics['val_psnr']:.2f}"
+    )
+
     logger.info("训练完成！")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='TiTok MRI Fine-tuning')
     parser.add_argument('--data_root', type=str,
-                      default='/root/Documents/ICLR-Med/MedCompression/dataloader/acdc_img_datasets',
+                      default='../acdc_img_datasets',
                       help='ACDC数据集路径')
     parser.add_argument('--output_dir', type=str, default='./outputs',
                       help='输出目录')
     parser.add_argument('--tokenizer_path', type=str,
-                      default='./checkpoints/tokenizer_titok_b64',
-                      help='Tokenizer路径')
+                      default='./checkpoints/tokenizer_titok_bl128_vae_c16_imagenet',
+                      help='Tokenizer checkpoint路径 (默认: 最佳性能模型)')
     parser.add_argument('--generator_path', type=str,
-                      default='./checkpoints/generator_titok_b64',
-                      help='Generator路径')
+                      default=None,
+                      help='Generator checkpoint路径 (可选)')
     parser.add_argument('--batch_size', type=int, default=8,
                       help='批次大小')
     parser.add_argument('--num_epochs', type=int, default=20,
@@ -382,9 +483,13 @@ if __name__ == "__main__":
     parser.add_argument('--learning_rate', type=float, default=1e-4,
                       help='学习率')
     parser.add_argument('--save_every', type=int, default=5,
-                      help='每多少个epoch保存一次')
+                      help='每多少个epoch保存一次checkpoint')
+    parser.add_argument('--save_images', action='store_true',
+                      help='保存验证和测试图像样本')
+    parser.add_argument('--save_image_every', type=int, default=5,
+                      help='每多少个epoch保存一次验证图像')
     parser.add_argument('--device', type=str, default='cuda',
-                      help='计算设备')
+                      help='计算设备 (cuda/cpu/auto)')
 
     args = parser.parse_args()
     main(args)

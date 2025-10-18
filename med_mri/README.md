@@ -1,406 +1,154 @@
-# 🫀 TiTok MRI Fine-tuning Module
+# 🫀 TiTok MRI Fine-tuning
 
-A comprehensive framework for fine-tuning the TiTok model on ACDC heart MRI dataset for medical image compression and reconstruction tasks.
+Fine-tuning TiTok model on ACDC heart MRI dataset for medical image compression.
 
-## Overview
+**Features**: ~3000x compression ratio, CPU/GPU support, PyTorch implementation.
 
-This module implements fine-tuning of the TiTok tokenizer on the ACDC (Automated Cardiac Diagnosis Challenge) MRI dataset. The TiTok model efficiently compresses cardiac MRI images into discrete tokens while maintaining reconstruction quality.
+## 📊 Dataset Setup
 
-### Key Features
+### Convert ACDC Dataset (NIfTI → PNG)
 
-- **Efficient Compression**: ~3000x compression ratio with minimal quality loss
-- **Medical Focus**: Optimized for cardiac MRI analysis
-- **Flexible Architecture**: Supports both tokenizer and generator fine-tuning
-- **Easy Integration**: Clean PyTorch implementation with HuggingFace model support
-- **CPU & GPU Support**: Works on both CPU and CUDA devices
-
-## 🏗️ Project Structure
-
-```
-med_mri/
-├── acdc_dataset.py          # ACDC dataset loader and preprocessing
-├── finetune_titok_mri.py    # Main fine-tuning script
-├── test_finetune.py         # Quick functionality test
-├── config_finetune.yaml     # Configuration file
-└── README.md                # This file
-```
-
-## 📊 Dataset
-
-### ACDC (Automated Cardiac Diagnosis Challenge)
-
-- **Total Images**: 2,758 cardiac MRI frames
-- **Patients**: 100 cardiac patients
-- **Image Size**: 256×256 pixels (resized)
-- **Dataset Split**:
-  - **Training**: 70 patients, 2,029 images (71%)
-  - **Validation**: 20 patients, 504 images (18%)
-  - **Testing**: 10 patients, 225 images (11%)
-
-### Data Format
-
-- **Input**: PNG images from ACDC dataset
-- **Format**: Cardiac MRI frames (grayscale, converted to RGB)
-- **Resolution**: Variable → 256×256 (normalized)
-- **Range**: [0, 1] (normalized)
-
-## 🚀 Quick Start
-
-### 1. Installation
+If you have the original ACDC dataset in NIfTI format, convert it to PNG images:
 
 ```bash
-# Clone the repository
-cd /root/Documents/ICLR-Med/MedCompression
+# Navigate to med_mri directory
+cd med_mri
 
-# Install dependencies
-pip install torch torchvision
-pip install transformers huggingface-hub
-pip install pillow numpy matplotlib tqdm pyyaml omegaconf
+# Convert NIfTI files to PNG (requires nibabel)
+python convert_acdc.py
+
+# Expected output structure:
+# acdc_img_datasets/
+# ├── patient001/
+# │   ├── frame_000_slice_000.png
+# │   ├── frame_000_slice_001.png
+# │   └── ...
+# ├── patient002/
+# │   └── ...
+# └── ...
 ```
 
-### 2. Prepare Dataset
+**Requirements**: Install nibabel for NIfTI file handling
+```bash
+pip install nibabel
+```
+
+**Source**: Place original ACDC dataset at `./acdc_dataset/` (relative to med_mri directory)
+
+### Pre-converted Dataset
 
 Ensure ACDC dataset is available at:
 ```
-/root/Documents/ICLR-Med/MedCompression/dataloader/acdc_img_datasets/
+../acdc_img_datasets/
 ```
 
-Dataset structure:
-```
-acdc_img_datasets/
-├── patient001/
-│   ├── frame_000.png
-│   ├── frame_001.png
-│   └── ...
-├── patient002/
-│   └── ...
-└── ...
-```
+## 🚀 Commands
 
-### 3. Test Installation
-
+### Install Dependencies
 ```bash
-cd /root/Documents/ICLR-Med/MedCompression/1d-tokenizer
-
-# Quick test
-python ../med_mri/test_finetune.py
+cd /userhome/cs3/fung0311/CVPR-2025/MedCompression
+pip install torch torchvision transformers pillow numpy matplotlib tqdm pyyaml omegaconf
 ```
 
-Expected output:
-```
-🎉 所有测试通过!
-TiTok MRI微调脚本功能正常
-```
-
-### 4. Start Training
-
+### Download Checkpoints
 ```bash
-# CPU training (recommended for testing)
-python ../med_mri/finetune_titok_mri.py \
-    --batch_size 4 \
-    --num_epochs 5 \
-    --learning_rate 1e-4 \
-    --device cpu
+# Interactive model selection (recommended)
+python download_checkpoints.py
 
-# GPU training (if available)
-python ../med_mri/finetune_titok_mri.py \
-    --batch_size 8 \
-    --num_epochs 20 \
-    --learning_rate 1e-4 \
-    --device cuda
+# Download best performing model (non-interactive)
+python download_checkpoints.py --non-interactive
+
+# Download to custom directory
+python download_checkpoints.py --output_dir ../my_checkpoints --non-interactive
+
+# Download specific models
+python download_checkpoints.py --models tokenizer_bl128_vae  # Best FID (0.84)
+python download_checkpoints.py --models tokenizer_b64        # Balanced performance
+python download_checkpoints.py --models tokenizer_bl128_vq   # VQ alternative
+
+# List all available models
+python download_checkpoints.py --list
+
+**⚠️ Authentication Required:**
+```bash
+# These TiTok models require HuggingFace authentication
+huggingface-cli login
+
+# Or set environment variable:
+# export HF_TOKEN=your_token_here
 ```
 
-## 📝 Core Components
-
-### 1. ACDCMRIDataset (`acdc_dataset.py`)
-
-ACDC MRI dataset loader with support for train/val/test splits.
-
-**Key Methods:**
-- `__init__()`: Initialize dataset with split and preprocessing options
-- `__len__()`: Return dataset size
-- `__getitem__()`: Load and preprocess individual images
-
-**Usage:**
-```python
-from med_mri.acdc_dataset import create_data_loaders
-
-loaders = create_data_loaders(
-    data_root="/path/to/acdc_img_datasets",
-    batch_size=8,
-    num_workers=4,
-    image_size=(256, 256),
-    augment=True
-)
-
-# Access loaders
-train_loader = loaders['train']
-val_loader = loaders['val']
-test_loader = loaders['test']
+**Manual Download:** If automatic download fails, manually download from:
+- https://huggingface.co/yucornetto/tokenizer_titok_bl128_vae_c16_imagenet
+- https://huggingface.co/yucornetto/tokenizer_titok_b64_imagenet
 ```
 
-### 2. TiTokMRIWrapper (`finetune_titok_mri.py`)
+**Model Performance (FID scores - lower is better):**
+- `tokenizer_bl128_vae` - **FID: 0.84** ⭐ Best performance (default for H800)
+- `tokenizer_sl256_vq` - FID: 1.03
+- `tokenizer_bl128_vq` - FID: 1.49
+- `tokenizer_b64` - FID: 1.70 (balanced size/performance)
+- `tokenizer_bl64_vae` - FID: 1.25
+- `tokenizer_ll32_vae` - FID: 1.61
 
-PyTorch module wrapper for TiTok model optimized for MRI tasks.
+**Available Models:**
+- **VAE models**: Best reconstruction quality, suitable for H800 fine-tuning
+- **VQ models**: Good balance of quality and speed
+- **Standard models**: Smaller size, faster training
 
-**Key Classes:**
-- `TiTokMRIWrapper`: Main model wrapper
-  - `forward()`: Encode image → reconstruct image
-  - `tokenize()`: Only encode to tokens
-  - `to()`: Move to device
-
-- `TiTokMRIEvaluator`: Metrics computation
-  - `compute_metrics()`: Calculate MSE, PSNR, compression ratio
-
-**Usage:**
-```python
-from med_mri.finetune_titok_mri import TiTokMRIWrapper
-
-model = TiTokMRIWrapper(
-    tokenizer_path="./checkpoints/tokenizer_titok_b64",
-    generator_path="./checkpoints/generator_titok_b64",
-    device='cuda'
-)
-
-# Forward pass
-reconstructed, tokens = model(images)  # images: [B, 3, 256, 256]
-                                        # reconstructed: [B, 3, 256, 256]
-                                        # tokens: [B, 12, 1, 64]
+### Test Setup
+```bash
+cd med_mri
+python test_finetune.py
 ```
 
-### 3. Training Functions
+### Train Model (CUDA - Recommended)
+```bash
+# Basic CUDA training
+python finetune_titok_mri.py --batch_size 8 --num_epochs 20
 
-**train_one_epoch()**: Single epoch training
-```python
-metrics = train_one_epoch(
-    model, train_loader, optimizer, device,
-    epoch=0, total_epochs=20
-)
+# CUDA training with image saving
+python finetune_titok_mri.py --batch_size 8 --num_epochs 20 --save_images --save_image_every 5
 ```
 
-**validate()**: Validation loop
-```python
-val_metrics = validate(
-    model, val_loader, device, epoch=0,
-    evaluator=evaluator
-)
+### Train Model (GPU via SLURM)
+```bash
+./gpu_run.sh train
+```
+
+### Train Model (CPU - Slow)
+```bash
+python finetune_titok_mri.py --batch_size 2 --num_epochs 5 --device cpu
+```
+
+### GPU Interactive Session
+```bash
+./gpu_run.sh bash
 ```
 
 ## ⚙️ Configuration
 
-Edit `config_finetune.yaml` to customize training:
+Key parameters in `finetune_titok_mri.py`:
+- `--batch_size`: Training batch size (default: 8)
+- `--num_epochs`: Number of epochs (default: 20)
+- `--learning_rate`: Learning rate (default: 1e-4)
+- `--device`: Device to use (`cuda`/`cpu`/auto, default: `cuda`)
+- `--save_images`: Save validation/test image samples (flag)
+- `--save_image_every`: Save validation images every N epochs (default: 5)
 
-```yaml
-# Data configuration
-data:
-  batch_size: 8
-  image_size: [256, 256]
-  augment: true
-  num_workers: 4
+## 🔧 Basic Troubleshooting
 
-# Training configuration
-training:
-  num_epochs: 20
-  learning_rate: 1e-4
-  weight_decay: 1e-4
-  save_every: 5  # Save checkpoint every 5 epochs
-
-# Model configuration
-model:
-  freeze_generator: true  # Only fine-tune tokenizer
-  tokenizer_path: "./checkpoints/tokenizer_titok_b64"
-  generator_path: "./checkpoints/generator_titok_b64"
-
-# Device
-device: "cuda"  # or "cpu"
-```
-
-## 🎯 Training Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--data_root` | ACDC path | Dataset root directory |
-| `--output_dir` | `./outputs` | Output directory for checkpoints |
-| `--batch_size` | 8 | Training batch size |
-| `--num_epochs` | 20 | Total training epochs |
-| `--learning_rate` | 1e-4 | Initial learning rate |
-| `--save_every` | 5 | Save checkpoint every N epochs |
-| `--device` | `cuda` | Device (`cuda` or `cpu`) |
-
-## 📊 Expected Results
-
-### Model Statistics
-
-- **Total Parameters**: 204.8M
-- **Trainable Parameters**: 118.8M
-- **Frozen Parameters**: 86.0M (generator)
-
-### Reconstruction Quality
-
-- **MSE (Mean Squared Error)**: ~0.01-0.02
-- **PSNR (Peak Signal-to-Noise Ratio)**: ~18-20 dB
-- **Compression Ratio**: ~3072x (from 786,432 pixels to 64 tokens)
-
-## 🔧 Troubleshooting
-
-### Issue: "CUDA is not available"
-
-**Solution**: Use CPU mode
+**CUDA not available**: Use `--device cpu`
 ```bash
 python finetune_titok_mri.py --device cpu
 ```
 
-### Issue: "Dataset not found"
-
-**Solution**: Verify ACDC dataset path
+**Out of memory**: Reduce batch size
 ```bash
-ls /root/Documents/ICLR-Med/MedCompression/dataloader/acdc_img_datasets/
+python finetune_titok_mri.py --batch_size 2
 ```
 
-### Issue: "Out of memory"
-
-**Solution**: Reduce batch size
+**Dataset not found**: Check path
 ```bash
-python finetune_titok_mri.py --batch_size 2 --num_epochs 5
+ls ../acdc_img_datasets/
 ```
-
-### Issue: "Model download fails"
-
-**Solution**: Use local checkpoints
-```bash
-python finetune_titok_mri.py \
-    --tokenizer_path ./checkpoints/tokenizer_titok_b64 \
-    --generator_path ./checkpoints/generator_titok_b64
-```
-
-## 📈 Monitoring Training
-
-Training logs are saved to the output directory:
-
-```
-outputs/
-├── checkpoints/
-│   ├── checkpoint_epoch_005.pt
-│   ├── checkpoint_epoch_010.pt
-│   └── best_model.pt
-├── train_log.txt
-└── config.yaml
-```
-
-Each checkpoint contains:
-- Model state dictionary
-- Optimizer state
-- Training metrics
-- Epoch information
-
-## 🔬 Advanced Usage
-
-### Custom Data Augmentation
-
-```python
-from med_mri.acdc_dataset import ACDCMRIDataset
-
-dataset = ACDCMRIDataset(
-    data_root="/path/to/data",
-    split='train',
-    image_size=(256, 256),
-    augment=True,  # Enable augmentation
-    max_images=100  # Limit for testing
-)
-```
-
-### Inference
-
-```python
-model.eval()
-with torch.no_grad():
-    image = torch.randn(1, 3, 256, 256)
-
-    # Encode to tokens
-    tokens, _ = model.tokenizer.encode(image)
-
-    # Decode to reconstruct
-    reconstructed = model.tokenizer.decode(tokens)
-```
-
-### Evaluate on Test Set
-
-```python
-model.eval()
-evaluator = TiTokMRIEvaluator()
-
-test_metrics = validate(
-    model, test_loader, device,
-    epoch=-1, evaluator=evaluator
-)
-```
-
-## 📚 References
-
-### Papers
-
-- **TiTok**: "An Image is Worth 32 Tokens for Reconstruction and Generation"
-- **ACDC**: "Deep Learning Techniques for Medical Image Segmentation"
-
-### Model Sources
-
-- TiTok B-64: `yucornetto/tokenizer_titok_b64_imagenet`
-- Generator: `yucornetto/generator_titok_b64_imagenet`
-
-## 📝 Citation
-
-If you use this module in your research, please cite:
-
-```bibtex
-@article{yu2024an,
-  title={An Image is Worth 32 Tokens for Reconstruction and Generation},
-  author={Yu, Qihang and Weber, Mark and Deng, Xueqing and others},
-  journal={NeurIPS},
-  year={2024}
-}
-
-@article{bernard2018deep,
-  title={Deep Learning Techniques for Medical Image Segmentation},
-  author={Bernard, Olivier and Lalande, Alain and others},
-  journal={IEEE Transactions on Medical Imaging},
-  year={2018}
-}
-```
-
-## 🤝 Contributing
-
-To improve this module:
-
-1. Create a new branch: `git checkout -b feature/your-feature`
-2. Make changes and test: `python test_finetune.py`
-3. Commit: `git commit -am "Add feature"`
-4. Push: `git push origin feature/your-feature`
-5. Create a Pull Request
-
-## 📧 Support
-
-For issues or questions:
-
-1. Check the [Troubleshooting](#-troubleshooting) section
-2. Review test outputs: `python test_finetune.py`
-3. Check model checkpoints directory for training logs
-4. Verify dataset paths are correct
-
-## 📋 Changelog
-
-### v1.0 (2025-10-19)
-- Initial release
-- Full training pipeline
-- ACDC dataset support
-- TiTok model integration
-- CPU and GPU support
-
-## 📄 License
-
-This module is part of the ICLR-Med project. See LICENSE file for details.
-
----
-
-**Status**: ✅ Ready for use
-**Last Updated**: October 19, 2025
-**Tested On**: Python 3.13, PyTorch 2.9.0, ACDC Dataset
