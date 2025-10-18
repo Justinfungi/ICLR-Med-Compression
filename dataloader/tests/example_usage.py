@@ -73,7 +73,7 @@ def example_basic_usage():
     output_dir = create_output_directory("basic_usage")
     
     # 数据路径
-    data_root = "/Users/fenghaojie/Documents/ICLR/MedCompression/acdc_dataset"
+    data_root = "./acdc_dataset"
     
     # 创建数据集 - 抑制SimpleITK警告
     with SuppressSTDERR():
@@ -102,70 +102,167 @@ def example_basic_usage():
     # 可视化样本并保存
     if 'images' in sample:
         print(f"\n🖼️ 可视化心脏时相...")
-        save_path = output_dir / f"cardiac_phases_{sample.get('patient_id', 'unknown')}.png"
-        # 直接保存，不显示
+
         try:
             # 设置matplotlib为非交互模式
             plt.ioff()
-            
+
             # 创建心脏时相可视化
             images = sample['images']
             segmentations = sample.get('segmentations', None)
-            
+
             if isinstance(images, torch.Tensor):
                 images = images.numpy()
             if segmentations is not None and isinstance(segmentations, torch.Tensor):
                 segmentations = segmentations.numpy()
-            
+
+            # 获取患者信息
+            patient_id = sample.get('patient_id', 'unknown')
+            patient_info = sample.get('patient_info', {})
+            disease = patient_info.get('Group', 'Unknown')
+
             # 选择中间切片
             slice_idx = images.shape[1] // 2
-            
-            # 创建子图
+
+            # === 1. 保存组合图像 (所有时相在一起) ===
+            combined_path = output_dir / f"{patient_id}_{disease}_combined_slice{slice_idx}.png"
+
             n_cols = 4 if segmentations is not None else 2
             fig, axes = plt.subplots(1, n_cols, figsize=(4*n_cols, 4))
-            
+
             if n_cols == 2:
                 axes = [axes[0], None, axes[1], None]
-            
+
             # 显示ED相
             ed_img = images[0, slice_idx]
             axes[0].imshow(ed_img, cmap='gray')
-            axes[0].set_title('ED (End-Diastolic)')
+            axes[0].set_title('ED (End-Diastolic)', fontsize=14, fontweight='bold')
             axes[0].axis('off')
-            
+
             if segmentations is not None:
                 ed_seg = segmentations[0, slice_idx]
                 axes[1].imshow(ed_seg, cmap='viridis')
-                axes[1].set_title('ED Segmentation')
+                axes[1].set_title('ED Segmentation', fontsize=14, fontweight='bold')
                 axes[1].axis('off')
-            
+
             # 显示ES相
             es_img = images[1, slice_idx]
             axes[2].imshow(es_img, cmap='gray')
-            axes[2].set_title('ES (End-Systolic)')
+            axes[2].set_title('ES (End-Systolic)', fontsize=14, fontweight='bold')
             axes[2].axis('off')
-            
+
             if segmentations is not None:
                 es_seg = segmentations[1, slice_idx]
                 axes[3].imshow(es_seg, cmap='viridis')
-                axes[3].set_title('ES Segmentation')
+                axes[3].set_title('ES Segmentation', fontsize=14, fontweight='bold')
                 axes[3].axis('off')
-            
-            # 添加患者信息
-            patient_info = sample.get('patient_info', {})
-            disease = patient_info.get('Group', 'Unknown')
-            plt.suptitle(f'Patient: {sample.get("patient_id", "Unknown")} | Disease: {disease} | Slice: {slice_idx}', 
-                         fontsize=12)
-            
+
+            plt.suptitle(f'{patient_id} | Disease: {disease} | Slice: {slice_idx}',
+                         fontsize=16, fontweight='bold')
+
             plt.tight_layout()
-            
-            # 保存图像
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.savefig(combined_path, dpi=300, bbox_inches='tight')
             plt.close()
-            print(f"💾 心脏时相图像已保存: {save_path}")
-            
+            print(f"💾 组合图像已保存: {combined_path}")
+
+            # === 2. 分别保存ED图像 ===
+            fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+            ax.imshow(ed_img, cmap='gray')
+            ax.set_title(f'{patient_id} | ED (End-Diastolic) | {disease}',
+                        fontsize=14, fontweight='bold')
+            ax.axis('off')
+            plt.tight_layout()
+
+            ed_image_path = output_dir / f"{patient_id}_{disease}_ED_image_slice{slice_idx}.png"
+            plt.savefig(ed_image_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"💾 ED图像已保存: {ed_image_path}")
+
+            # === 3. 分别保存ES图像 ===
+            fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+            ax.imshow(es_img, cmap='gray')
+            ax.set_title(f'{patient_id} | ES (End-Systolic) | {disease}',
+                        fontsize=14, fontweight='bold')
+            ax.axis('off')
+            plt.tight_layout()
+
+            es_image_path = output_dir / f"{patient_id}_{disease}_ES_image_slice{slice_idx}.png"
+            plt.savefig(es_image_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"💾 ES图像已保存: {es_image_path}")
+
+            # === 4. 如果有分割标注，也分别保存 ===
+            if segmentations is not None:
+                # ED分割
+                fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+                im = ax.imshow(ed_seg, cmap='viridis')
+                ax.set_title(f'{patient_id} | ED Segmentation | {disease}',
+                            fontsize=14, fontweight='bold')
+                ax.axis('off')
+                plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04,
+                            label='Labels: 0=BG, 1=RV, 2=LV-Myo, 3=LV')
+                plt.tight_layout()
+
+                ed_seg_path = output_dir / f"{patient_id}_{disease}_ED_segmentation_slice{slice_idx}.png"
+                plt.savefig(ed_seg_path, dpi=300, bbox_inches='tight')
+                plt.close()
+                print(f"💾 ED分割已保存: {ed_seg_path}")
+
+                # ES分割
+                fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+                im = ax.imshow(es_seg, cmap='viridis')
+                ax.set_title(f'{patient_id} | ES Segmentation | {disease}',
+                            fontsize=14, fontweight='bold')
+                ax.axis('off')
+                plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04,
+                            label='Labels: 0=BG, 1=RV, 2=LV-Myo, 3=LV')
+                plt.tight_layout()
+
+                es_seg_path = output_dir / f"{patient_id}_{disease}_ES_segmentation_slice{slice_idx}.png"
+                plt.savefig(es_seg_path, dpi=300, bbox_inches='tight')
+                plt.close()
+                print(f"💾 ES分割已保存: {es_seg_path}")
+
+                # === 5. 保存叠加图像 (图像+分割边界) ===
+                from matplotlib.colors import ListedColormap
+
+                # ED叠加
+                fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+                ax.imshow(ed_img, cmap='gray')
+                # 创建透明的分割掩码
+                masked_seg = np.ma.masked_where(ed_seg == 0, ed_seg)
+                ax.imshow(masked_seg, cmap='jet', alpha=0.4)
+                ax.set_title(f'{patient_id} | ED Overlay | {disease}',
+                            fontsize=14, fontweight='bold')
+                ax.axis('off')
+                plt.tight_layout()
+
+                ed_overlay_path = output_dir / f"{patient_id}_{disease}_ED_overlay_slice{slice_idx}.png"
+                plt.savefig(ed_overlay_path, dpi=300, bbox_inches='tight')
+                plt.close()
+                print(f"💾 ED叠加图已保存: {ed_overlay_path}")
+
+                # ES叠加
+                fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+                ax.imshow(es_img, cmap='gray')
+                masked_seg = np.ma.masked_where(es_seg == 0, es_seg)
+                ax.imshow(masked_seg, cmap='jet', alpha=0.4)
+                ax.set_title(f'{patient_id} | ES Overlay | {disease}',
+                            fontsize=14, fontweight='bold')
+                ax.axis('off')
+                plt.tight_layout()
+
+                es_overlay_path = output_dir / f"{patient_id}_{disease}_ES_overlay_slice{slice_idx}.png"
+                plt.savefig(es_overlay_path, dpi=300, bbox_inches='tight')
+                plt.close()
+                print(f"💾 ES叠加图已保存: {es_overlay_path}")
+
+            print(f"\n✨ 共保存了 {7 if segmentations is not None else 3} 张图像到: {output_dir}")
+
         except Exception as e:
             print(f"⚠️ 可视化保存失败: {e}")
+            import traceback
+            traceback.print_exc()
     
     return dataset
 
@@ -369,7 +466,7 @@ def example_cardiac_metrics():
         # 获取ED和ES分割图
         ed_seg = sample['segmentations'][0].numpy()  # ED
         es_seg = sample['segmentations'][1].numpy()  # ES
-        input(sample['metadata'])
+        
         # 获取体素间距
         spacing = sample['metadata'].get('spacing', (1.5625, 1.5625, 10.0))
         

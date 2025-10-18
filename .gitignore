@@ -166,6 +166,22 @@ dmypy.json
 *.model
 *.weights
 *.pb
+*.safetensors
+*.bin
+
+# HuggingFace cache and models
+.cache/
+**/checkpoints/
+**/models/
+**/pretrained/
+**/.cache/huggingface/
+transformers_cache/
+
+# TiTok and tokenizer specific files
+1d-tokenizer/checkpoints/
+1d-tokenizer/.git/
+**/tokenizer_*/
+**/generator_*/
 
 # TensorBoard logs
 logs/
@@ -318,10 +334,20 @@ README_TiTok.md
 *.7z
 
 # 大文件和二进制文件
-*.bin
 *.dat
 *.npy
 *.npz
+
+# Git pack files and large objects
+*.pack
+*.idx
+objects/pack/
+
+# Large exported image datasets
+acdc_img_datasets/
+**/exported_images/
+**/png_exports/
+mri_compression_results/
 
 # Jupyter notebook outputs (keep notebooks but not outputs)
 *.ipynb
