@@ -102,6 +102,12 @@ try:
 except ImportError:
     from acdc_dataset import create_data_loaders, ACDCMRIDataset
 
+# 导入损失函数
+try:
+    from med_mri.loss import SimpleMRILoss, TiTokMRILoss
+except ImportError:
+    from loss import SimpleMRILoss, TiTokMRILoss
+
 warnings.filterwarnings("ignore")
 
 
@@ -350,8 +356,12 @@ def init_metrics_csv(csv_path):
     """初始化metrics CSV文件"""
     with open(csv_path, 'w', newline='') as f:
         writer = csv.writer(f)
-        # 写入表头 - always include SSIM now (manual implementation available)
-        headers = ['epoch', 'phase', 'loss', 'mse', 'psnr', 'compression_ratio', 'ssim']
+        # 写入表头 - 扩展支持新的损失组件
+        headers = [
+            'epoch', 'phase', 'total_loss', 'reconstruction_loss', 'perceptual_loss',
+            'weighted_gan_loss', 'discriminator_loss', 'logits_real', 'logits_fake',
+            'mse', 'psnr', 'compression_ratio', 'ssim'
+        ]
         if HAS_TORCHMETRICS:
             headers.extend(['psnr_torchmetrics', 'lpips'])
         writer.writerow(headers)
@@ -364,22 +374,29 @@ def log_metrics_to_csv(csv_path, epoch, phase, metrics):
 
         # Handle different key names for different phases
         if phase == 'train':
-            # Training only has loss
-            mse = ''
-            psnr = ''
-            compression_ratio = ''
-            loss = metrics.get('train_loss', '')
+            # Training has loss components but no validation metrics
+            total_loss = metrics.get('total_loss', '')
+            reconstruction_loss = metrics.get('reconstruction_loss', '')
+            perceptual_loss = metrics.get('perceptual_loss', '')
+            weighted_gan_loss = metrics.get('weighted_gan_loss', '')
+            discriminator_loss = metrics.get('discriminator_loss', '')
+            logits_real = metrics.get('logits_real', '')
+            logits_fake = metrics.get('logits_fake', '')
+            mse = psnr = compression_ratio = ssim = ''
         else:
-            # Validation/Test have mse, psnr, etc.
+            # Validation/Test have evaluation metrics
+            total_loss = reconstruction_loss = perceptual_loss = weighted_gan_loss = ''
+            discriminator_loss = logits_real = logits_fake = ''
             mse = metrics.get('val_mse', metrics.get('mse', ''))
             psnr = metrics.get('val_psnr', metrics.get('psnr', ''))
             compression_ratio = metrics.get('compression_ratio', '')
-            loss = ''  # Validation doesn't have loss
+            ssim = metrics.get('ssim', '')
 
-        row = [epoch, phase, loss, mse, psnr, compression_ratio]
-
-        # Always include SSIM now (manual implementation available)
-        row.append(metrics.get('ssim', ''))
+        row = [
+            epoch, phase, total_loss, reconstruction_loss, perceptual_loss,
+            weighted_gan_loss, discriminator_loss, logits_real, logits_fake,
+            mse, psnr, compression_ratio, ssim
+        ]
 
         if HAS_TORCHMETRICS:
             row.extend([metrics.get('psnr_torchmetrics', ''), metrics.get('lpips', '')])
@@ -391,14 +408,18 @@ def train_one_epoch(
     model: TiTokMRIWrapper,
     train_loader: DataLoader,
     optimizer: optim.Optimizer,
+    loss_fn: nn.Module,
     device: str,
     epoch: int,
     total_epochs: int,
+    global_step: int = 0,
+    discriminator_optimizer: optim.Optimizer = None,
 ) -> Dict[str, float]:
     """训练一个epoch"""
     model.train()  # 确保模型处于训练模式
     model.tokenizer.train()  # 确保tokenizer处于训练模式
-    total_loss = 0.0
+
+    total_metrics = {}
     n_batches = 0
 
     pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{total_epochs} [Train]")
@@ -409,20 +430,51 @@ def train_one_epoch(
         # 前向传播
         reconstructed, tokens = model(images)
 
-        # 重建损失
-        loss = nn.MSELoss()(reconstructed, images)
+        # 计算生成器损失 (始终训练)
+        loss, loss_dict = loss_fn(images, reconstructed, global_step, mode="generator")
 
-        # 反向传播
+        # 反向传播 (生成器)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        total_loss += loss.item()
+        # 累积生成器metrics
+        for key, value in loss_dict.items():
+            if key not in total_metrics:
+                total_metrics[key] = 0.0
+            total_metrics[key] += value.item()
+
+        # 训练判别器 (如果启用且到达训练步数)
+        if discriminator_optimizer is not None and hasattr(loss_fn, 'should_discriminator_be_trained') and loss_fn.should_discriminator_be_trained(global_step):
+            # 判别器训练步
+            discriminator_loss, discriminator_loss_dict = loss_fn(images, reconstructed, global_step, mode="discriminator")
+
+            # 反向传播 (判别器)
+            discriminator_optimizer.zero_grad()
+            discriminator_loss.backward()
+            discriminator_optimizer.step()
+
+            # 累积判别器metrics
+            for key, value in discriminator_loss_dict.items():
+                metric_key = f"discriminator_{key}"
+                if metric_key not in total_metrics:
+                    total_metrics[metric_key] = 0.0
+                total_metrics[metric_key] += value.item() if torch.is_tensor(value) else value
+
         n_batches += 1
+        global_step += 1
 
-        pbar.set_postfix({'loss': total_loss / n_batches})
+        # 更新进度条
+        pbar_metrics = {'total_loss': total_metrics['total_loss'] / n_batches}
+        if 'reconstruction_loss' in total_metrics:
+            pbar_metrics['recon_loss'] = total_metrics['reconstruction_loss'] / n_batches
+        if 'discriminator_loss' in total_metrics:
+            pbar_metrics['disc_loss'] = total_metrics['discriminator_loss'] / n_batches
+        pbar.set_postfix(pbar_metrics)
 
-    return {'train_loss': total_loss / n_batches}
+    # 计算平均值
+    avg_metrics = {key: value / n_batches for key, value in total_metrics.items()}
+    return avg_metrics
 
 
 def validate(
@@ -583,6 +635,38 @@ def main(args):
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"模型参数: 总计 {total_params:,}, 可训练 {trainable_params:,}")
 
+    # 创建损失函数
+    logger.info("创建损失函数...")
+    loss_config = {
+        'reconstruction_weight': getattr(args, 'reconstruction_weight', 1.0),
+        'perceptual_weight': getattr(args, 'perceptual_weight', 0.1),
+        'reconstruction_loss_type': getattr(args, 'reconstruction_loss_type', 'l2'),
+        'perceptual_net_type': getattr(args, 'perceptual_net_type', 'vgg16'),
+        'use_gan': getattr(args, 'use_gan', False),
+        'discriminator_weight': getattr(args, 'discriminator_weight', 0.5),
+        'discriminator_start': getattr(args, 'discriminator_start', 1000),
+        'discriminator_input_nc': 3,  # TiTok输出RGB图像
+        'discriminator_ndf': 32,
+        'discriminator_layers': 3,
+    }
+
+    if getattr(args, 'use_full_loss', False):
+        loss_fn = TiTokMRILoss(loss_config)
+        logger.info("使用完整的TiTok MRI损失函数")
+    else:
+        loss_fn = SimpleMRILoss(loss_config)
+        logger.info("使用简化的MRI损失函数 (重建 + 感知)")
+
+    loss_fn = loss_fn.to(device)
+
+    # 创建判别器优化器 (如果使用GAN)
+    discriminator_optimizer = None
+    if hasattr(loss_fn, 'discriminator') and loss_fn.use_gan:
+        import torch.optim as optim
+        discriminator_params = list(loss_fn.discriminator.parameters())
+        discriminator_optimizer = optim.AdamW(discriminator_params, lr=1e-4, weight_decay=1e-4)
+        logger.info("创建判别器优化器")
+
     # 优化器
     optimizer = optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
@@ -602,6 +686,7 @@ def main(args):
 
     # 训练循环
     best_val_loss = float('inf')
+    global_step = 0
     logger.info("开始训练...")
 
     for epoch in range(args.num_epochs):
@@ -610,10 +695,16 @@ def main(args):
             model,
             data_loaders['train'],
             optimizer,
+            loss_fn,
             device,
             epoch,
-            args.num_epochs
+            args.num_epochs,
+            global_step,
+            discriminator_optimizer
         )
+
+        # 更新global_step
+        global_step += len(data_loaders['train'])
 
         # 验证 - 定期保存图像样本
         save_images_current = args.save_images and ((epoch + 1) % args.save_image_every == 0 or epoch == 0)
@@ -634,10 +725,17 @@ def main(args):
         log_metrics_to_csv(metrics_log_path, epoch + 1, 'train', train_metrics)
         log_metrics_to_csv(metrics_log_path, epoch + 1, 'val', val_metrics)
 
-        # 日志
-        log_msg = f"Epoch {epoch + 1}/{args.num_epochs} - Train Loss: {train_metrics['train_loss']:.6f} - Val MSE: {val_metrics['val_mse']:.6f} - Val PSNR: {val_metrics['val_psnr']:.2f}"
+        # 日志 - 使用新的metrics结构
+        train_loss_display = train_metrics.get('total_loss', train_metrics.get('train_loss', 0.0))
+        log_msg = f"Epoch {epoch + 1}/{args.num_epochs} - Train Loss: {train_loss_display:.6f} - Val MSE: {val_metrics['val_mse']:.6f} - Val PSNR: {val_metrics['val_psnr']:.2f}"
 
-        # 添加额外metrics到日志
+        # 添加训练损失组件详情
+        if 'reconstruction_loss' in train_metrics:
+            log_msg += f" - Recon: {train_metrics['reconstruction_loss']:.6f}"
+        if 'perceptual_loss' in train_metrics:
+            log_msg += f" - Percep: {train_metrics['perceptual_loss']:.6f}"
+
+        # 添加验证metrics详情
         if 'ssim' in val_metrics:
             log_msg += f" - Val SSIM: {val_metrics['ssim']:.4f}"
         if 'lpips' in val_metrics:
@@ -720,6 +818,24 @@ if __name__ == "__main__":
                       help='每多少个epoch保存一次验证图像')
     parser.add_argument('--device', type=str, default='cuda',
                       help='计算设备 (cuda/cpu/auto)')
+
+    # 损失函数相关参数
+    parser.add_argument('--use_full_loss', action='store_true',
+                      help='使用完整的TiTok损失函数 (包含GAN选项，默认使用简化版本)')
+    parser.add_argument('--reconstruction_weight', type=float, default=1.0,
+                      help='重建损失权重')
+    parser.add_argument('--perceptual_weight', type=float, default=0.1,
+                      help='感知损失权重')
+    parser.add_argument('--reconstruction_loss_type', type=str, default='l2',
+                      choices=['l1', 'l2'], help='重建损失类型 (l1或l2)')
+    parser.add_argument('--perceptual_net_type', type=str, default='vgg16',
+                      choices=['vgg16', 'vgg19'], help='感知损失使用的网络类型')
+    parser.add_argument('--use_gan', action='store_true',
+                      help='启用GAN对抗训练 (仅在使用完整损失函数时有效)')
+    parser.add_argument('--discriminator_weight', type=float, default=0.5,
+                      help='判别器损失权重')
+    parser.add_argument('--discriminator_start', type=int, default=1000,
+                      help='开始GAN训练的步数')
 
     args = parser.parse_args()
     main(args)

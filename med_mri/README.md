@@ -125,11 +125,49 @@ python test_finetune.py
 
 ### 训练模型 (CUDA - 推荐)
 ```bash
-# 基础CUDA训练
+# 基础CUDA训练 (默认简化损失函数)
 python finetune_titok_mri.py --batch_size 8 --num_epochs 20
 
 # CUDA训练并保存图像
 python finetune_titok_mri.py --batch_size 8 --num_epochs 20 --save_images --save_image_every 5
+
+# 🚀 完整示例 - 所有功能开启 (推荐用于高质量重建)
+python finetune_titok_mri.py \
+  --data_root ../acdc_img_datasets \
+  --output_dir ./outputs \
+  --tokenizer_path ./checkpoints/tokenizer_titok_bl128_vae_c16_imagenet \
+  --batch_size 8 \
+  --num_epochs 50 \
+  --learning_rate 1e-4 \
+  --save_every 10 \
+  --save_images \
+  --save_image_every 5 \
+  --device cuda \
+  --use_full_loss \
+  --use_gan \
+  --reconstruction_weight 1.0 \
+  --perceptual_weight 0.15 \
+  --reconstruction_loss_type l2 \
+  --perceptual_net_type vgg16 \
+  --discriminator_weight 0.8 \
+  --discriminator_start 5
+
+# 🎯 高质量重建配置 (平衡速度和质量)
+python finetune_titok_mri.py \
+  --batch_size 16 \
+  --num_epochs 30 \
+  --perceptual_weight 0.2 \
+  --reconstruction_loss_type l1 \
+  --save_images \
+  --save_image_every 10
+
+# 🏃‍♂️ 快速实验配置 (用于调试)
+python finetune_titok_mri.py \
+  --batch_size 4 \
+  --num_epochs 5 \
+  --perceptual_weight 0.05 \
+  --save_images \
+  --save_image_every 1
 ```
 
 ### 通过SLURM训练模型 (GPU)
@@ -149,13 +187,62 @@ python finetune_titok_mri.py --batch_size 2 --num_epochs 5 --device cpu
 
 ## ⚙️ 配置
 
-`finetune_titok_mri.py`中的关键参数：
-- `--batch_size`：训练批次大小 (默认: 8)
-- `--num_epochs`：训练轮数 (默认: 20)
-- `--learning_rate`：学习率 (默认: 1e-4)
-- `--device`：使用的设备 (`cuda`/`cpu`/auto，默认: `cuda`)
+### 📋 完整参数列表
+
+#### 基础训练参数
+- `--data_root`：ACDC数据集路径 (默认: `../acdc_img_datasets`)
+- `--output_dir`：输出目录 (默认: `./outputs`)
+- `--tokenizer_path`：Tokenizer checkpoint路径
+- `--batch_size`：训练批次大小 (默认: 8，建议: 4-16)
+- `--num_epochs`：训练轮数 (默认: 20，建议: 20-100)
+- `--learning_rate`：学习率 (默认: 1e-4，建议: 1e-5 到 5e-4)
+- `--device`：计算设备 (`cuda`/`cpu`/auto，默认: `cuda`)
+
+#### 检查点和保存参数
+- `--save_every`：每N个epoch保存checkpoint (默认: 5)
 - `--save_images`：保存验证/测试图像样本 (标志)
-- `--save_image_every`：每N个epoch保存一次验证图像 (默认: 5)
+- `--save_image_every`：每N个epoch保存验证图像 (默认: 5)
+
+#### 🎯 损失函数参数
+
+##### 简化的MRI损失函数 (默认)
+- `--reconstruction_weight`：重建损失权重 (默认: 1.0)
+- `--perceptual_weight`：感知损失权重 (默认: 0.1，建议: 0.05-0.2)
+- `--reconstruction_loss_type`：重建损失类型 (`l1`/`l2`，默认: `l2`)
+- `--perceptual_net_type`：感知损失网络 (`vgg16`/`vgg19`，默认: `vgg16`)
+
+##### 完整的TiTok损失函数
+- `--use_full_loss`：启用完整的TiTok损失函数 (标志)
+- `--use_gan`：启用GAN对抗训练 (标志)
+- `--discriminator_weight`：判别器损失权重 (默认: 0.5，建议: 0.3-1.0)
+- `--discriminator_start`：GAN训练开始步数 (默认: 1000，建议: 500-2000)
+
+### 💡 使用建议
+
+#### 🎯 高质量重建 (推荐用于最终模型)
+```bash
+# 使用完整损失函数，较高的感知权重
+--use_full_loss --use_gan --perceptual_weight 0.15 --discriminator_weight 0.8
+```
+
+#### ⚡ 快速训练 (用于实验和调试)
+```bash
+# 简化损失，较小的batch size
+--batch_size 4 --num_epochs 10 --perceptual_weight 0.05
+```
+
+#### 🏥 医学应用 (平衡质量和稳定性)
+```bash
+# L1损失更稳定，适中的感知权重
+--reconstruction_loss_type l1 --perceptual_weight 0.1 --batch_size 8
+```
+
+#### 🚀 大规模训练 (需要大量GPU资源)
+```bash
+# 更大的batch size，更长的训练
+--batch_size 32 --num_epochs 100 --perceptual_weight 0.2 --use_full_loss
+```
+
 
 ## 📁 输出目录结构
 

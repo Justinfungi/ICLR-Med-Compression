@@ -1,14 +1,19 @@
 # 变更日志
 
-## [1.2.7] - 2025-10-18
+## [1.2.8] - 2025-10-18
 
 ### Added
-- 手动实现SSIM计算：无需torchmetrics即可计算SSIM指标
-- 增强metrics计算：即使没有torchmetrics也能获得SSIM值
-- 改进CSV表头：SSIM列现在始终可用
+- 完整的损失函数模块 (`loss.py`)：基于TiTok Stage 2实现
+- 感知损失 (Perceptual Loss)：使用VGG网络特征
+- 简化和完整两种损失函数选项
+- 可选GAN对抗训练支持
+- Einops库集成用于优雅的张量操作
+- 扩展的CSV日志：记录所有损失组件
 
 ### Changed
-- 修改metrics导入策略：torchmetrics可选，手动实现作为后备方案
+- 训练脚本集成新损失函数：替换简单的MSE损失
+- 增强metrics记录：支持多组件损失跟踪
+- 改进命令行参数：添加损失函数配置选项
 
 ## [1.2.6] - 2025-10-18
 
